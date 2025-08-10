@@ -11,7 +11,7 @@ class OrderbookWatcher {
     this.lastSeenOrders = new Map();
     
     // Intervalle de vérification (5 minutes)
-    this.checkInterval = 5 * 60 * 1000;
+    this.checkInterval = 1 * 60 * 1000;
     
     // Démarrer la surveillance
     this.startWatching();
