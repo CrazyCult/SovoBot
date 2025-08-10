@@ -349,6 +349,31 @@ class ApiClient {
     return results;
   }
 
+  // =================== MÉTHODES CLASSEMENTS ===================
+  
+  async getLeagueTable(leagueId) {
+    if (!leagueId || isNaN(leagueId)) {
+      throw new Error('ID de ligue invalide');
+    }
+    
+    const data = await this.makeRequest('/league_tables', { league_id: parseInt(leagueId) });
+    
+    if (!data || !Array.isArray(data)) {
+      throw new Error(`Classement introuvable pour la ligue ${leagueId}`);
+    }
+    
+    // Trier par position actuelle
+    const sortedTable = data.sort((a, b) => a.new_position - b.new_position);
+    
+    // Enrichir avec les noms des clubs
+    const enrichedTable = sortedTable.map(team => ({
+      ...team,
+      club_name: this.getClubName(team.club_id)
+    }));
+    
+    return enrichedTable;
+  }
+
   // =================== UTILITAIRES FORMAT ===================
   
   formatMoney(amount) {
