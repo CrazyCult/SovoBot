@@ -10,7 +10,7 @@ class OrderbookWatcher {
     // Cache des derniers ordres vus pour chaque club
     this.lastSeenOrders = new Map();
     
-    // Intervalle de vérification (5 minutes)
+    // Intervalle de vérification (1 minute)
     this.checkInterval = 1 * 60 * 1000;
     
     // Démarrer la surveillance
@@ -23,12 +23,12 @@ class OrderbookWatcher {
       this.checkAllWatchedClubs();
     }, 30000);
     
-    // Puis vérification toutes les 5 minutes
+    // Puis vérification toutes les 1 minute
     setInterval(() => {
       this.checkAllWatchedClubs();
     }, this.checkInterval);
     
-    logger.info('🔍 Surveillance orderbook démarrée (vérification toutes les 5 minutes)');
+    logger.info('🔍 Surveillance orderbook démarrée (vérification toutes les 1 minute)');
   }
 
   async checkAllWatchedClubs() {
