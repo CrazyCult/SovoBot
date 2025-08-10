@@ -138,6 +138,9 @@ class SoccerverseBot {
         case 'orderbook':
           await this.handleOrderbookButton(interaction, params);
           break;
+        case 'watchlist':
+          await this.handleWatchlistButton(interaction, params);
+          break;
         default:
           await interaction.reply({ 
             content: '❌ Interaction non reconnue.', 
@@ -218,7 +221,8 @@ class SoccerverseBot {
                    `\`!orderbook ${clubId} <prix_min> <prix_max>\`\n\n` +
                    '**Exemples :**\n' +
                    `• \`!orderbook ${clubId} 1000 5000\` - Surveiller les ordres entre 1000$ et 5000$\n` +
-                   `• \`!orderbook ${clubId} 2000\` - Surveiller les ordres à partir de 2000$`,
+                   `• \`!orderbook ${clubId} 2000\` - Surveiller les ordres à partir de 2000$\n\n` +
+                   '**Note :** La surveillance se déclenchera automatiquement quand vous utiliserez des critères de prix.',
           ephemeral: true
         });
         break;
@@ -268,6 +272,79 @@ class SoccerverseBot {
       default:
         await interaction.reply({ 
           content: '❌ Action orderbook non reconnue.', 
+          ephemeral: true 
+        });
+    }
+  }
+
+  async handleWatchlistButton(interaction, params) {
+    const [action] = params;
+    const channelId = interaction.channel.id;
+    
+    switch (action) {
+      case 'stop':
+      case 'all':
+        // Arrêter toutes les surveillances
+        const settings = this.dataManager.getChannelSettings(channelId);
+        const orderbookWatching = settings.orderbookWatching || {};
+        
+        const activeWatches = Object.entries(orderbookWatching)
+          .filter(([clubId, config]) => config.enabled);
+        
+        if (activeWatches.length === 0) {
+          await interaction.reply({
+            content: '⚠️ Aucune surveillance active à arrêter.',
+            ephemeral: true
+          });
+          return;
+        }
+        
+        // Arrêter toutes les surveillances
+        for (const [clubId, config] of activeWatches) {
+          if (this.orderbookWatcher) {
+            this.orderbookWatcher.disableWatching(channelId, parseInt(clubId));
+          }
+        }
+        await this.dataManager.save();
+        
+        await interaction.reply({
+          content: `✅ ${activeWatches.length} surveillance(s) arrêtée(s) avec succès.`,
+          ephemeral: true
+        });
+        break;
+        
+      case 'refresh':
+        // Actualiser la liste des surveillances
+        try {
+          const watchlistCommand = this.commands.get('watchlist');
+          if (watchlistCommand) {
+            await interaction.deferReply();
+            
+            const simulatedMessage = {
+              channel: interaction.channel,
+              reply: async (options) => {
+                await interaction.editReply(options);
+              }
+            };
+            
+            await watchlistCommand.execute(simulatedMessage, [], {
+              apiClient: this.apiClient,
+              dataManager: this.dataManager,
+              orderbookWatcher: this.orderbookWatcher
+            });
+          }
+        } catch (error) {
+          logger.error('Erreur actualisation watchlist:', error);
+          await interaction.reply({
+            content: '❌ Erreur lors de l\'actualisation de la watchlist.',
+            ephemeral: true
+          });
+        }
+        break;
+        
+      default:
+        await interaction.reply({ 
+          content: '❌ Action watchlist non reconnue.', 
           ephemeral: true 
         });
     }
