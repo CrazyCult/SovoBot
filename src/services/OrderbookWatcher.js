@@ -214,54 +214,15 @@ class OrderbookWatcher {
   }
 
   // Méthode unifiée et améliorée pour récupérer l'orderbook
-// À remplacer dans BOTH orderbook.js ET OrderbookWatcher.js
-
-async fetchClubOrderbook(clubId) {
-  try {
-    const axios = require('axios');
-    
-    // 1. ESSAYER D'ABORD L'API DIRECTE (sans proxy)
+  async fetchClubOrderbook(clubId) {
     try {
-      console.log(`🌐 Tentative API directe pour club ${clubId}`);
-      const response = await axios.get('https://orderbook.soccerverse.io/clubs', {
-        timeout: 8000,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'SoccerverseBot/3.0',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
-      });
+      const axios = require('axios');
       
-      if (response.status === 200 && response.data && response.data.data && response.data.data[clubId]) {
-        console.log(`✅ API directe réussie pour club ${clubId}`);
-        return this.parseOrderbookData(response.data.data[clubId], clubId);
-      }
-    } catch (error) {
-      console.log(`⚠️ API directe échouée: ${error.message}`);
-    }
-    
-    // 2. FALLBACK: PROXIES CORS avec cache-busting
-    const proxies = [
-      'https://api.allorigins.win/raw?url=',
-      'https://cors-anywhere.herokuapp.com/',
-      'https://api.codetabs.com/v1/proxy?quest=',
-      'https://thingproxy.freeboard.io/fetch/',
-      'https://cors.bridged.cc/',
-      'https://corsproxy.io/?'
-    ];
-    
-    // Ajouter cache-busting timestamp
-    const cacheBuster = Date.now();
-    const targetUrl = `https://orderbook.soccerverse.io/clubs?t=${cacheBuster}`;
-    
-    for (let i = 0; i < proxies.length; i++) {
-      const proxy = proxies[i];
+      // 1. ESSAYER D'ABORD L'API DIRECTE (sans proxy)
       try {
-        console.log(`🔄 Tentative proxy ${i + 1}/${proxies.length}: ${proxy.split('://')[1].split('/')[0]}`);
-        
-        const response = await axios.get(proxy + encodeURIComponent(targetUrl), {
-          timeout: 12000,
+        console.log(`🌐 Tentative API directe pour club ${clubId}`);
+        const response = await axios.get('https://orderbook.soccerverse.io/clubs', {
+          timeout: 8000,
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'SoccerverseBot/3.0',
@@ -270,75 +231,111 @@ async fetchClubOrderbook(clubId) {
           }
         });
         
-        if (response.status !== 200) {
-          console.log(`❌ Proxy ${i + 1} - HTTP ${response.status}`);
-          continue;
+        if (response.status === 200 && response.data && response.data.data && response.data.data[clubId]) {
+          console.log(`✅ API directe réussie pour club ${clubId}`);
+          return this.parseOrderbookData(response.data.data[clubId], clubId);
         }
-        
-        let data;
-        try {
-          // Certains proxies retournent une string, d'autres un objet
-          data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-        } catch (parseError) {
-          console.log(`❌ Proxy ${i + 1} - Parsing JSON failed`);
-          continue;
-        }
-        
-        if (data && data.data && data.data[clubId]) {
-          console.log(`✅ Proxy ${i + 1} réussi pour club ${clubId}`);
-          return this.parseOrderbookData(data.data[clubId], clubId);
-        } else {
-          console.log(`❌ Proxy ${i + 1} - Données club ${clubId} manquantes`);
-        }
-        
       } catch (error) {
-        console.log(`❌ Proxy ${i + 1} - Erreur: ${error.message}`);
-        continue;
+        console.log(`⚠️ API directe échouée: ${error.message}`);
       }
+      
+      // 2. FALLBACK: PROXIES CORS avec cache-busting
+      const proxies = [
+        'https://api.allorigins.win/raw?url=',
+        'https://cors-anywhere.herokuapp.com/',
+        'https://api.codetabs.com/v1/proxy?quest=',
+        'https://thingproxy.freeboard.io/fetch/',
+        'https://cors.bridged.cc/',
+        'https://corsproxy.io/?'
+      ];
+      
+      // Ajouter cache-busting timestamp
+      const cacheBuster = Date.now();
+      const targetUrl = `https://orderbook.soccerverse.io/clubs?t=${cacheBuster}`;
+      
+      for (let i = 0; i < proxies.length; i++) {
+        const proxy = proxies[i];
+        try {
+          console.log(`🔄 Tentative proxy ${i + 1}/${proxies.length}: ${proxy.split('://')[1].split('/')[0]}`);
+          
+          const response = await axios.get(proxy + encodeURIComponent(targetUrl), {
+            timeout: 12000,
+            headers: {
+              'Accept': 'application/json',
+              'User-Agent': 'SoccerverseBot/3.0',
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            }
+          });
+          
+          if (response.status !== 200) {
+            console.log(`❌ Proxy ${i + 1} - HTTP ${response.status}`);
+            continue;
+          }
+          
+          let data;
+          try {
+            // Certains proxies retournent une string, d'autres un objet
+            data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+          } catch (parseError) {
+            console.log(`❌ Proxy ${i + 1} - Parsing JSON failed`);
+            continue;
+          }
+          
+          if (data && data.data && data.data[clubId]) {
+            console.log(`✅ Proxy ${i + 1} réussi pour club ${clubId}`);
+            return this.parseOrderbookData(data.data[clubId], clubId);
+          } else {
+            console.log(`❌ Proxy ${i + 1} - Données club ${clubId} manquantes`);
+          }
+          
+        } catch (error) {
+          console.log(`❌ Proxy ${i + 1} - Erreur: ${error.message}`);
+          continue;
+        }
+      }
+      
+      console.log(`❌ Tous les proxies ont échoué pour club ${clubId}`);
+      throw new Error('Impossible de récupérer l\'orderbook via tous les proxies');
+      
+    } catch (error) {
+      console.error(`💥 Erreur fetchClubOrderbook ${clubId}:`, error.message);
+      throw new Error(`Impossible de récupérer l'orderbook: ${error.message}`);
+    }
+  }
+
+  // Méthode helper pour parser les données
+  parseOrderbookData(orders, clubId) {
+    if (!Array.isArray(orders)) {
+      throw new Error(`Données orderbook invalides pour club ${clubId}`);
     }
     
-    console.log(`❌ Tous les proxies ont échoué pour club ${clubId}`);
-    throw new Error('Impossible de récupérer l\'orderbook via tous les proxies');
+    console.log(`📊 Parsing ${orders.length} ordres pour club ${clubId}`);
     
-  } catch (error) {
-    console.error(`💥 Erreur fetchClubOrderbook ${clubId}:`, error.message);
-    throw new Error(`Impossible de récupérer l'orderbook: ${error.message}`);
-  }
-}
-
-// Méthode helper pour parser les données (à ajouter aussi)
-parseOrderbookData(orders, clubId) {
-  if (!Array.isArray(orders)) {
-    throw new Error(`Données orderbook invalides pour club ${clubId}`);
-  }
-  
-  console.log(`📊 Parsing ${orders.length} ordres pour club ${clubId}`);
-  
-  // Séparer les ordres d'achat (0) et de vente (1)
-  const buyOrders = orders
-    .filter(order => order[2] === 0)
-    .map(order => ({
-      orderId: order[0],
-      username: order[1] || 'Utilisateur supprimé',
-      isAsk: order[2],
-      price: order[3],
-      shares: order[4]
-    }));
-  
-  const sellOrders = orders
-    .filter(order => order[2] === 1)
-    .map(order => ({
-      orderId: order[0],
-      username: order[1] || 'Utilisateur supprimé',
-      isAsk: order[2],
-      price: order[3],
-      shares: order[4]
-    }));
-  
-  console.log(`✅ Club ${clubId}: ${buyOrders.length} achats, ${sellOrders.length} ventes`);
-  
-  return { buyOrders, sellOrders };
-}
+    // Séparer les ordres d'achat (0) et de vente (1)
+    const buyOrders = orders
+      .filter(order => order[2] === 0)
+      .map(order => ({
+        orderId: order[0],
+        username: order[1] || 'Utilisateur supprimé',
+        isAsk: order[2],
+        price: order[3],
+        shares: order[4]
+      }));
+    
+    const sellOrders = orders
+      .filter(order => order[2] === 1)
+      .map(order => ({
+        orderId: order[0],
+        username: order[1] || 'Utilisateur supprimé',
+        isAsk: order[2],
+        price: order[3],
+        shares: order[4]
+      }));
+    
+    console.log(`✅ Club ${clubId}: ${buyOrders.length} achats, ${sellOrders.length} ventes`);
+    
+    return { buyOrders, sellOrders };
   }
 
   // Méthodes de gestion de la surveillance
