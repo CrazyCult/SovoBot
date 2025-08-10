@@ -151,26 +151,21 @@ module.exports = {
         inline: false
       });
 
-      // Afficher le classement en 2 colonnes pour optimiser l'espace
+      // Afficher le classement avec plus d'équipes - format optimisé
       const totalTeams = leagueTable.length;
-      const teamsPerColumn = 10; // 10 équipes par colonne
-      const maxTeamsToShow = 40; // Maximum 40 équipes (4 colonnes de 10)
+      const maxTeamsToShow = Math.min(totalTeams, 50); // Augmenter à 50 équipes avec le format compact
 
-      // Limiter le nombre d'équipes si nécessaire
-      const teamsToShow = Math.min(totalTeams, maxTeamsToShow);
-      const numColumns = Math.ceil(teamsToShow / teamsPerColumn);
+      // Diviser en groupes de 25 équipes maximum par field (format compact)
+      const teamsPerField = 25;
+      const numFields = Math.ceil(maxTeamsToShow / teamsPerField);
 
-      // Créer les colonnes par paires
-      for (let pairIndex = 0; pairIndex < Math.ceil(numColumns / 2); pairIndex++) {
-        const leftColumnIndex = pairIndex * 2;
-        const rightColumnIndex = leftColumnIndex + 1;
+      for (let fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
+        const startIndex = fieldIndex * teamsPerField;
+        const endIndex = Math.min(startIndex + teamsPerField, maxTeamsToShow);
 
-        // Colonne de gauche
-        const leftStart = leftColumnIndex * teamsPerColumn;
-        const leftEnd = Math.min(leftStart + teamsPerColumn, teamsToShow);
-        let leftColumnText = '';
+        let tableText = '';
 
-        for (let i = leftStart; i < leftEnd; i++) {
+        for (let i = startIndex; i < endIndex; i++) {
           const team = leagueTable[i];
           const clubName = apiClient.getClubName(team.club_id);
           const isTarget = team.club_id === clubId;
@@ -180,53 +175,24 @@ module.exports = {
           const prefix = isTarget ? '**►** ' : '';
           const suffix = isTarget ? ' **◄**' : '';
 
-          leftColumnText += `${prefix}**${team.new_position}.** ${clubName}${suffix}\n`;
-          leftColumnText += `   └ ${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} ${positionChange}\n\n`;
+          // Format ultra-compact pour afficher plus d'équipes
+          tableText += `${prefix}**${team.new_position}.** ${clubName}${suffix} - ${team.pts}pts (${team.won}-${team.drawn}-${team.lost}) ${positionChange}\n`;
         }
 
-        // Colonne de droite (si elle existe)
-        let rightColumnText = '';
-        if (rightColumnIndex < numColumns) {
-          const rightStart = rightColumnIndex * teamsPerColumn;
-          const rightEnd = Math.min(rightStart + teamsPerColumn, teamsToShow);
-
-          for (let i = rightStart; i < rightEnd; i++) {
-            const team = leagueTable[i];
-            const clubName = apiClient.getClubName(team.club_id);
-            const isTarget = team.club_id === clubId;
-            const positionChange = this.getPositionChange(team.old_position, team.new_position);
-
-            // Mettre en évidence le club recherché
-            const prefix = isTarget ? '**►** ' : '';
-            const suffix = isTarget ? ' **◄**' : '';
-
-            rightColumnText += `${prefix}**${team.new_position}.** ${clubName}${suffix}\n`;
-            rightColumnText += `   └ ${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} ${positionChange}\n\n`;
-          }
+        // Nom du champ selon la position
+        let fieldName;
+        if (numFields === 1) {
+          fieldName = `📊 Classement complet (${maxTeamsToShow} équipes)`;
+        } else {
+          const rangeStart = startIndex + 1;
+          const rangeEnd = endIndex;
+          fieldName = `📊 Classement ${rangeStart}-${rangeEnd}`;
         }
 
-        // Ajouter les champs (colonnes)
-        const leftRange = `${leftStart + 1}-${leftEnd}`;
         embed.addFields({
-          name: `📊 Classement ${leftRange}`,
-          value: leftColumnText || 'Aucune donnée',
-          inline: true
-        });
-
-        if (rightColumnText) {
-          const rightRange = `${rightColumnIndex * teamsPerColumn + 1}-${rightColumnIndex * teamsPerColumn + Math.min(teamsPerColumn, teamsToShow - rightColumnIndex * teamsPerColumn)}`;
-          embed.addFields({
-            name: `📊 Classement ${rightRange}`,
-            value: rightColumnText,
-            inline: true
-          });
-        }
-
-        // Ajouter un champ vide pour forcer un retour à la ligne
-        embed.addFields({
-          name: '\u200B', // Caractère invisible
-          value: '\u200B',
-          inline: true
+          name: fieldName,
+          value: tableText || 'Aucune donnée',
+          inline: false
         });
       }
 
@@ -234,7 +200,7 @@ module.exports = {
       if (totalTeams > maxTeamsToShow) {
         embed.addFields({
           name: '📝 Note',
-          value: `Affichage des ${maxTeamsToShow} premières équipes sur ${totalTeams} au total.`,
+          value: `Affichage des ${maxTeamsToShow} premières équipes sur ${totalTeams} au total.\n💡 Le classement complet sera disponible dans une future mise à jour.`,
           inline: false
         });
       }
