@@ -218,10 +218,70 @@ class SoccerverseBot {
                    `\`!orderbook ${clubId} <prix_min> <prix_max>\`\n\n` +
                    '**Exemples :**\n' +
                    `• \`!orderbook ${clubId} 1000 5000\` - Surveiller les ordres entre 1000$ et 5000$\n` +
-                   `• \`!orderbook ${clubId} 2000\` - Surveiller les ordres à partir de 2000# 🔄 Guide de mise à jour GitHub - Commande Orderbook
+                   `• \`!orderbook ${clubId} 2000\` - Surveiller les ordres à partir de 2000$`,
+          ephemeral: true
+        });
+        break;
+        
+      case 'stop':
+        if (this.orderbookWatcher) {
+          this.orderbookWatcher.disableWatching(channelId, parseInt(clubId));
+          await this.dataManager.save();
+          
+          await interaction.reply({
+            content: `✅ Surveillance des ordres arrêtée pour le club #${clubId}.`,
+            ephemeral: true
+          });
+        }
+        break;
+        
+      case 'refresh':
+        // Relancer la commande orderbook
+        try {
+          const orderbookCommand = this.commands.get('orderbook');
+          if (orderbookCommand) {
+            // Simuler l'exécution de la commande
+            await interaction.deferReply();
+            
+            // Créer un objet message simulé
+            const simulatedMessage = {
+              channel: interaction.channel,
+              reply: async (options) => {
+                await interaction.editReply(options);
+              }
+            };
+            
+            await orderbookCommand.execute(simulatedMessage, [clubId], {
+              apiClient: this.apiClient,
+              dataManager: this.dataManager,
+              orderbookWatcher: this.orderbookWatcher
+            });
+          }
+        } catch (error) {
+          await interaction.reply({
+            content: '❌ Erreur lors de l\'actualisation de l\'orderbook.',
+            ephemeral: true
+          });
+        }
+        break;
+        
+      default:
+        await interaction.reply({ 
+          content: '❌ Action orderbook non reconnue.', 
+          ephemeral: true 
+        });
+    }
+  }
 
-## 📁 Structure des fichiers à ajouter/modifier
+  async start() {
+    await this.initialize();
+    await this.client.login(process.env.DISCORD_TOKEN);
+  }
+}
 
-### 1. Créer le dossier services
-```bash
-mkdir src/services
+// Démarrer le bot
+const bot = new SoccerverseBot();
+bot.start().catch(error => {
+  logger.error('❌ Erreur fatale:', error);
+  process.exit(1);
+});
