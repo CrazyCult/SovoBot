@@ -1,347 +1,219 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder } = require('discord.js');
+const logger = require('../utils/logger');
 
-module.exports = {
-  name: 'orderbook',
-  description: 'Afficher et surveiller les ordres d\'achat/vente d\'un club',
-  usage: '!orderbook [club_id] [min_price] [max_price]',
-  
-  async execute(message, args, { apiClient, dataManager }) {
-    const channelId = message.channel.id;
-    let clubId;
-    let minPrice = null;
-    let maxPrice = null;
+class OrderbookWatcher {
+  constructor(client, dataManager, apiClient) {
+    this.client = client;
+    this.dataManager = dataManager;
+    this.apiClient = apiClient;
+    
+    // Cache des derniers ordres vus pour chaque club
+    this.lastSeenOrders = new Map();
+    
+    // Intervalle de vérification (1 minute)
+    this.checkInterval = 1 * 60 * 1000;
+    
+    // Démarrer la surveillance
+    this.startWatching();
+  }
 
-    // Si aucun argument, utiliser les clubs enregistrés
-    if (args.length === 0) {
-      const registeredClubs = dataManager.getChannelClubs(channelId);
+  startWatching() {
+    // Vérification initiale après 30 secondes
+    setTimeout(() => {
+      this.checkAllWatchedClubs();
+    }, 30000);
+    
+    // Puis vérification toutes les 1 minute
+    setInterval(() => {
+      this.checkAllWatchedClubs();
+    }, this.checkInterval);
+    
+    logger.info('🔍 Surveillance orderbook démarrée (vérification toutes les 1 minute)');
+  }
+
+  async checkAllWatchedClubs() {
+    try {
+      // Récupérer tous les canaux avec surveillance orderbook activée
+      const watchedClubs = this.getWatchedClubs();
       
-      if (registeredClubs.length === 0) {
-        const embed = new EmbedBuilder()
-          .setColor('#FFA500')
-          .setTitle('📋 Aucun club inscrit')
-          .setDescription('Ce salon n\'a aucun club inscrit aux notifications.')
-          .addFields({
-            name: '💡 Usage',
-            value: '• `!orderbook` - Orderbook du club inscrit\n• `!orderbook <club_id>` - Orderbook d\'un club spécifique\n• `!orderbook <club_id> <min> <max>` - Avec surveillance des prix'
-          })
-          .addFields({
-            name: '📝 Pour s\'inscrire',
-            value: '`!inscription <club_id>`'
-          })
-          .setFooter({ text: 'Soccerverse Bot v3.0' });
-        
-        await message.reply({ embeds: [embed] });
+      if (watchedClubs.length === 0) {
         return;
       }
-
-      clubId = parseInt(registeredClubs[0]);
       
-      if (registeredClubs.length > 1) {
-        const clubNames = [];
-        for (const id of registeredClubs.slice(0, 3)) {
-          try {
-            const clubData = await apiClient.getClubDetails(id);
-            clubNames.push(clubData.display_name);
-          } catch (error) {
-            clubNames.push(`Club #${id}`);
+      logger.debug(`🔍 Vérification orderbook pour ${watchedClubs.length} surveillance(s)`);
+      
+      for (const watch of watchedClubs) {
+        try {
+          await this.checkClubOrders(watch);
+          // Attendre 1 seconde entre chaque vérification pour éviter de surcharger l'API
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          logger.error(`Erreur surveillance club ${watch.clubId}:`, error);
+        }
+      }
+      
+    } catch (error) {
+      logger.error('Erreur surveillance orderbook globale:', error);
+    }
+  }
+
+  getWatchedClubs() {
+    const watched = [];
+    
+    // Parcourir tous les canaux avec des paramètres de surveillance
+    for (const [channelId, registrations] of this.dataManager.data.registrations.entries()) {
+      const settings = this.dataManager.getChannelSettings(channelId);
+      
+      if (settings.orderbookWatching) {
+        for (const [clubId, watchConfig] of Object.entries(settings.orderbookWatching)) {
+          if (watchConfig.enabled) {
+            watched.push({
+              channelId,
+              clubId: parseInt(clubId),
+              minPrice: watchConfig.minPrice,
+              maxPrice: watchConfig.maxPrice
+            });
           }
         }
-        
-        const embed = new EmbedBuilder()
-          .setColor('#2196F3')
-          .setTitle('📋 Plusieurs clubs inscrits')
-          .setDescription(`Affichage de l'orderbook de **${apiClient.getClubName(clubId)}** (premier club inscrit).`)
-          .addFields({
-            name: '🏟️ Clubs inscrits dans ce salon',
-            value: clubNames.join(', ') + (registeredClubs.length > 3 ? `... et ${registeredClubs.length - 3} autre(s)` : '')
-          })
-          .setFooter({ text: 'Soccerverse Bot v3.0' });
-        
-        await message.reply({ embeds: [embed] });
       }
-    } else {
-      // Arguments fournis
-      clubId = parseInt(args[0]);
-      if (args[1]) minPrice = parseFloat(args[1]);
-      if (args[2]) maxPrice = parseFloat(args[2]);
     }
     
-    // Vérifier que l'ID est un nombre
-    if (isNaN(clubId)) {
-      const embed = new EmbedBuilder()
-        .setColor('#FF6B6B')
-        .setTitle('❌ ID invalide')
-        .setDescription('L\'ID du club doit être un nombre.')
-        .addFields({
-          name: 'Exemples valides',
-          value: '`!orderbook 2180`\n`!orderbook 2180 1000 5000`'
-        });
-      
-      await message.reply({ embeds: [embed] });
-      return;
-    }
+    return watched;
+  }
 
-    // Vérifier les prix min/max
-    if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) {
-      const embed = new EmbedBuilder()
-        .setColor('#FF6B6B')
-        .setTitle('❌ Paramètres invalides')
-        .setDescription('Le prix minimum ne peut pas être supérieur au prix maximum.')
-        .addFields({
-          name: 'Exemple correct',
-          value: '`!orderbook 2180 1000 5000`'
-        });
-      
-      await message.reply({ embeds: [embed] });
-      return;
-    }
-
+  async checkClubOrders(watch) {
+    const { channelId, clubId, minPrice, maxPrice } = watch;
+    
     try {
-      // Récupérer les infos du club
-      let clubData;
-      try {
-        clubData = await apiClient.getClubDetails(clubId);
-      } catch (error) {
-        const embed = new EmbedBuilder()
-          .setColor('#FF6B6B')
-          .setTitle('❌ Club introuvable')
-          .setDescription(`Le club avec l'ID **${clubId}** n'existe pas.`)
-          .addFields({
-            name: '💡 Suggestion',
-            value: 'Vérifiez l\'ID du club et réessayez.'
-          });
-        
-        await message.reply({ embeds: [embed] });
-        return;
-      }
-      
-      // Récupérer les ordres du club
+      // Récupérer l'orderbook actuel
       const orderbook = await this.fetchClubOrderbook(clubId);
       
-      if (!orderbook || (orderbook.buyOrders.length === 0 && orderbook.sellOrders.length === 0)) {
-        const embed = new EmbedBuilder()
-          .setColor('#FFA500')
-          .setTitle('📊 Aucun ordre')
-          .setDescription(`Aucun ordre d'achat ou de vente trouvé pour **${clubData.display_name}**.`)
-          .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
-          .setFooter({ text: `Club ID: ${clubId} • Soccerverse Bot v3.0` });
-        
-        await message.reply({ embeds: [embed] });
+      if (!orderbook) {
         return;
       }
-
-      // Filtrer les ordres selon les critères de prix
-      let filteredBuyOrders = orderbook.buyOrders;
-      let filteredSellOrders = orderbook.sellOrders;
       
-      if (minPrice !== null || maxPrice !== null) {
-        if (minPrice !== null) {
-          filteredBuyOrders = filteredBuyOrders.filter(order => order.price >= minPrice * 10000);
-          filteredSellOrders = filteredSellOrders.filter(order => order.price >= minPrice * 10000);
-        }
-        if (maxPrice !== null) {
-          filteredBuyOrders = filteredBuyOrders.filter(order => order.price <= maxPrice * 10000);
-          filteredSellOrders = filteredSellOrders.filter(order => order.price <= maxPrice * 10000);
-        }
-      }
-
-      // Vérifier si une surveillance est déjà active pour ce club
-      const settings = dataManager.getChannelSettings(channelId);
-      const orderbookWatching = settings.orderbookWatching || {};
-      const isWatched = orderbookWatching[clubId] && orderbookWatching[clubId].enabled;
-
-      // Créer l'embed principal
-      const embed = new EmbedBuilder()
-        .setColor('#9B59B6')
-        .setTitle(`📊 Orderbook - ${clubData.display_name}`)
-        .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
-        .setDescription(`**Manager:** ${clubData.manager_name}\n**Pays:** ${apiClient.formatCountryName(clubData.country_id)}`);
-
-      // Ajouter les critères de filtrage si définis
-      if (minPrice !== null || maxPrice !== null) {
-        let filterText = 'Filtres actifs: ';
-        if (minPrice !== null) filterText += `Min: ${minPrice.toLocaleString()}$ `;
-        if (maxPrice !== null) filterText += `Max: ${maxPrice.toLocaleString()}$`;
-        
-        embed.addFields({
-          name: '🔍 Filtrage',
-          value: filterText,
-          inline: false
-        });
-      }
-
-      // Afficher l'état de surveillance si active
-      if (isWatched) {
-        const watchConfig = orderbookWatching[clubId];
-        let watchText = '🔔 **Surveillance active**';
-        if (watchConfig.minPrice || watchConfig.maxPrice) {
-          watchText += ' - Critères: ';
-          if (watchConfig.minPrice) watchText += `Min: ${(watchConfig.minPrice / 10000).toLocaleString()}$ `;
-          if (watchConfig.maxPrice) watchText += `Max: ${(watchConfig.maxPrice / 10000).toLocaleString()}$`;
-        }
-        
-        embed.addFields({
-          name: '👁️ Surveillance',
-          value: watchText,
-          inline: false
-        });
-      }
-
-      // Ajouter les ordres d'achat
-      if (filteredBuyOrders.length > 0) {
-        const buyOrdersText = filteredBuyOrders
-          .sort((a, b) => b.price - a.price) // Trier par prix décroissant
-          .slice(0, 10) // Limiter à 10 ordres
-          .map(order => {
-            const price = (order.price / 10000).toLocaleString('fr-FR');
-            return `**${order.username || 'Utilisateur supprimé'}**\n└ ${price}$ • ${order.shares} parts • #${order.orderId}`;
-          })
-          .join('\n\n');
-
-        embed.addFields({
-          name: `📈 Ordres d'Achat (${filteredBuyOrders.length})`,
-          value: buyOrdersText || 'Aucun ordre d\'achat',
-          inline: true
-        });
-      } else {
-        embed.addFields({
-          name: '📈 Ordres d\'Achat (0)',
-          value: 'Aucun ordre d\'achat',
-          inline: true
-        });
-      }
-
-      // Ajouter les ordres de vente
-      if (filteredSellOrders.length > 0) {
-        const sellOrdersText = filteredSellOrders
-          .sort((a, b) => a.price - b.price) // Trier par prix croissant
-          .slice(0, 10) // Limiter à 10 ordres
-          .map(order => {
-            const price = (order.price / 10000).toLocaleString('fr-FR');
-            return `**${order.username || 'Utilisateur supprimé'}**\n└ ${price}$ • ${order.shares} parts • #${order.orderId}`;
-          })
-          .join('\n\n');
-
-        embed.addFields({
-          name: `📉 Ordres de Vente (${filteredSellOrders.length})`,
-          value: sellOrdersText || 'Aucun ordre de vente',
-          inline: true
-        });
-      } else {
-        embed.addFields({
-          name: '📉 Ordres de Vente (0)',
-          value: 'Aucun ordre de vente',
-          inline: true
-        });
-      }
-
-      // Statistiques générales
-      const totalBuyOrders = orderbook.buyOrders.length;
-      const totalSellOrders = orderbook.sellOrders.length;
-      const avgBuyPrice = totalBuyOrders > 0 ? 
-        (orderbook.buyOrders.reduce((sum, order) => sum + order.price, 0) / totalBuyOrders / 10000).toFixed(2) : 0;
-      const avgSellPrice = totalSellOrders > 0 ? 
-        (orderbook.sellOrders.reduce((sum, order) => sum + order.price, 0) / totalSellOrders / 10000).toFixed(2) : 0;
-
-      embed.addFields({
-        name: '📊 Statistiques',
-        value: `**Total ordres:** ${totalBuyOrders + totalSellOrders}\n` +
-               `**Prix moyen achat:** ${avgBuyPrice}$\n` +
-               `**Prix moyen vente:** ${avgSellPrice}$`,
-        inline: false
-      });
-
-      embed.setFooter({ text: `Club ID: ${clubId} • Actualisé le ${new Date().toLocaleString('fr-FR')}` })
-           .setTimestamp();
-
-      // Ajouter des boutons d'action
-      const actionRow = new ActionRowBuilder();
+      // Obtenir les derniers ordres vus pour ce club
+      const lastSeen = this.lastSeenOrders.get(clubId) || { buyOrders: [], sellOrders: [] };
       
-      // NOUVEAU COMPORTEMENT: Activer surveillance SEULEMENT si des critères sont fournis
-      if (minPrice !== null || maxPrice !== null) {
-        const isRegistered = dataManager.isTeamRegistered(channelId, clubId);
-        if (isRegistered) {
-          // Enregistrer les critères de surveillance dans les paramètres du canal
-          const currentSettings = dataManager.getChannelSettings(channelId);
-          const orderbookWatching = currentSettings.orderbookWatching || {};
-          
-          orderbookWatching[clubId] = {
-            minPrice: minPrice ? minPrice * 10000 : undefined,
-            maxPrice: maxPrice ? maxPrice * 10000 : undefined,
-            enabled: true,
-            startedAt: Date.now()
-          };
-          
-          dataManager.setChannelSettings(channelId, {
-            orderbookWatching: orderbookWatching
-          });
-          
-          actionRow.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`orderbook_stop_${clubId}`)
-              .setLabel('Arrêter la surveillance')
-              .setStyle(ButtonStyle.Danger)
-              .setEmoji('🔕')
-          );
-        }
-      } else {
-        // Affichage simple sans critères - proposer de surveiller
-        if (isWatched) {
-          // Surveillance déjà active, proposer de l'arrêter
-          actionRow.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`orderbook_stop_${clubId}`)
-              .setLabel('Arrêter la surveillance')
-              .setStyle(ButtonStyle.Danger)
-              .setEmoji('🔕')
-          );
-        } else {
-          // Pas de surveillance, proposer d'en créer une
-          actionRow.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`orderbook_watch_${clubId}`)
-              .setLabel('Surveiller ce club')
-              .setStyle(ButtonStyle.Primary)
-              .setEmoji('👁️')
-          );
-        }
+      // Détecter les nouveaux ordres
+      const newBuyOrders = this.findNewOrders(orderbook.buyOrders, lastSeen.buyOrders, minPrice, maxPrice);
+      const newSellOrders = this.findNewOrders(orderbook.sellOrders, lastSeen.sellOrders, minPrice, maxPrice);
+      
+      // Envoyer notifications si nouveaux ordres
+      if (newBuyOrders.length > 0 || newSellOrders.length > 0) {
+        await this.sendOrderNotification(channelId, clubId, newBuyOrders, newSellOrders, minPrice, maxPrice);
       }
-
-      actionRow.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`orderbook_refresh_${clubId}`)
-          .setLabel('Actualiser')
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji('🔄')
-      );
-
-      await message.reply({ 
-        embeds: [embed],
-        components: [actionRow]
-      });
-
+      
+      // Mettre à jour le cache
+      this.lastSeenOrders.set(clubId, orderbook);
+      
     } catch (error) {
-      console.error('❌ Erreur dans la commande orderbook:', error);
-      
-      const errorEmbed = new EmbedBuilder()
-        .setColor('#FF6B6B')
-        .setTitle('❌ Erreur')
-        .setDescription('Une erreur est survenue lors de la récupération de l\'orderbook.')
-        .addFields({
-          name: '💡 Suggestions',
-          value: '• Vérifiez que l\'ID du club est correct\n• L\'API orderbook peut être temporairement indisponible\n• Réessayez dans quelques instants'
-        })
-        .addFields({
-          name: '🔧 Détails techniques',
-          value: `\`\`\`${error.message}\`\`\``
-        })
-        .setFooter({ text: 'Soccerverse Bot v3.0' });
-      
-      await message.reply({ embeds: [errorEmbed] });
+      logger.error(`Erreur vérification club ${clubId}:`, error);
     }
-  },
+  }
 
-  // Méthode pour récupérer l'orderbook d'un club spécifique
+  findNewOrders(currentOrders, lastOrders, minPrice, maxPrice) {
+    const lastOrderIds = new Set(lastOrders.map(order => order.orderId));
+    
+    return currentOrders.filter(order => {
+      // Vérifier si c'est un nouvel ordre
+      if (lastOrderIds.has(order.orderId)) {
+        return false;
+      }
+      
+      // Vérifier les critères de prix
+      if (minPrice !== undefined && order.price < minPrice) {
+        return false;
+      }
+      
+      if (maxPrice !== undefined && order.price > maxPrice) {
+        return false;
+      }
+      
+      return true;
+    });
+  }
+
+  async sendOrderNotification(channelId, clubId, newBuyOrders, newSellOrders, minPrice, maxPrice) {
+    try {
+      const channel = this.client.channels.cache.get(channelId);
+      if (!channel) {
+        logger.warn(`Canal ${channelId} introuvable pour notification orderbook`);
+        return;
+      }
+      
+      // Récupérer les infos du club
+      let clubName = this.apiClient.getClubName(clubId);
+      
+      // Créer l'embed de notification
+      const embed = new EmbedBuilder()
+        .setColor('#E74C3C')
+        .setTitle('🚨 Nouveaux Ordres Détectés!')
+        .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
+        .setDescription(`**${clubName}** (#${clubId})`)
+        .setTimestamp();
+
+      // Ajouter les critères de surveillance
+      let filterText = '';
+      if (minPrice !== undefined) filterText += `Min: ${(minPrice / 10000).toLocaleString()}$ `;
+      if (maxPrice !== undefined) filterText += `Max: ${(maxPrice / 10000).toLocaleString()}$`;
+      
+      if (filterText) {
+        embed.addFields({
+          name: '🔍 Critères de surveillance',
+          value: filterText.trim(),
+          inline: false
+        });
+      }
+
+      // Ajouter les nouveaux ordres d'achat
+      if (newBuyOrders.length > 0) {
+        const buyOrdersText = newBuyOrders
+          .slice(0, 5) // Limiter à 5 ordres
+          .map(order => {
+            const price = (order.price / 10000).toLocaleString('fr-FR');
+            return `**${order.username || 'Utilisateur supprimé'}**\n└ ${price}$ • ${order.shares} parts • #${order.orderId}`;
+          })
+          .join('\n\n');
+
+        embed.addFields({
+          name: `📈 Nouveaux Ordres d'Achat (${newBuyOrders.length})`,
+          value: buyOrdersText,
+          inline: false
+        });
+      }
+
+      // Ajouter les nouveaux ordres de vente
+      if (newSellOrders.length > 0) {
+        const sellOrdersText = newSellOrders
+          .slice(0, 5) // Limiter à 5 ordres
+          .map(order => {
+            const price = (order.price / 10000).toLocaleString('fr-FR');
+            return `**${order.username || 'Utilisateur supprimé'}**\n└ ${price}$ • ${order.shares} parts • #${order.orderId}`;
+          })
+          .join('\n\n');
+
+        embed.addFields({
+          name: `📉 Nouveaux Ordres de Vente (${newSellOrders.length})`,
+          value: sellOrdersText,
+          inline: false
+        });
+      }
+
+      embed.setFooter({ 
+        text: `Surveillé toutes les ${this.checkInterval / 60000} minutes • Soccerverse Bot v3.0` 
+      });
+
+      await channel.send({ embeds: [embed] });
+      
+      logger.info(`📊 Notification orderbook envoyée: Club ${clubId}, Canal ${channelId}, ${newBuyOrders.length} achats, ${newSellOrders.length} ventes`);
+      
+    } catch (error) {
+      logger.error('Erreur envoi notification orderbook:', error);
+    }
+  }
+
+  // Méthode unifiée et améliorée pour récupérer l'orderbook
   async fetchClubOrderbook(clubId) {
     try {
       const axios = require('axios');
@@ -430,7 +302,7 @@ module.exports = {
       console.error(`💥 Erreur fetchClubOrderbook ${clubId}:`, error.message);
       throw new Error(`Impossible de récupérer l'orderbook: ${error.message}`);
     }
-  },
+  }
 
   // Méthode helper pour parser les données
   parseOrderbookData(orders, clubId) {
@@ -465,4 +337,51 @@ module.exports = {
     
     return { buyOrders, sellOrders };
   }
-};
+
+  // Méthodes de gestion de la surveillance
+  
+  enableWatching(channelId, clubId, minPrice, maxPrice) {
+    const settings = this.dataManager.getChannelSettings(channelId);
+    const orderbookWatching = settings.orderbookWatching || {};
+    
+    orderbookWatching[clubId] = {
+      minPrice: minPrice ? minPrice * 10000 : undefined,
+      maxPrice: maxPrice ? maxPrice * 10000 : undefined,
+      enabled: true,
+      startedAt: Date.now()
+    };
+    
+    this.dataManager.setChannelSettings(channelId, {
+      orderbookWatching: orderbookWatching
+    });
+    
+    // Réinitialiser le cache pour ce club
+    this.lastSeenOrders.delete(clubId);
+    
+    logger.info(`🔍 Surveillance orderbook activée: Club ${clubId}, Canal ${channelId}`);
+  }
+
+  disableWatching(channelId, clubId) {
+    const settings = this.dataManager.getChannelSettings(channelId);
+    
+    if (settings.orderbookWatching && settings.orderbookWatching[clubId]) {
+      settings.orderbookWatching[clubId].enabled = false;
+      
+      this.dataManager.setChannelSettings(channelId, settings);
+      
+      logger.info(`🔍 Surveillance orderbook désactivée: Club ${clubId}, Canal ${channelId}`);
+    }
+  }
+
+  getWatchingStatus(channelId, clubId) {
+    const settings = this.dataManager.getChannelSettings(channelId);
+    
+    if (settings.orderbookWatching && settings.orderbookWatching[clubId]) {
+      return settings.orderbookWatching[clubId];
+    }
+    
+    return null;
+  }
+}
+
+module.exports = OrderbookWatcher;
