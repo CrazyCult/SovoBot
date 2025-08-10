@@ -120,7 +120,7 @@ module.exports = {
       name: '📊 Statistiques',
       value: 
         `**Total surveillances :** ${totalClubs}\n` +
-        `**Vérification :** Toutes les 5 minutes\n` +
+        `**Vérification :** Toutes les 1 minute\n` +
         `**Fourchette moyenne :** ${avgRange > 0 ? avgRange.toLocaleString() + '$' : 'Variable'}`,
       inline: false
     });

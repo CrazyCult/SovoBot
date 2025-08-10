@@ -355,13 +355,26 @@ class ApiClient {
     if (!leagueId || isNaN(leagueId)) {
       throw new Error('ID de ligue invalide');
     }
-    
-    const data = await this.makeRequest('/league_tables', { league_id: parseInt(leagueId) });
+
+    // Essayer d'abord avec un paramètre pour récupérer toutes les équipes
+    let data;
+    try {
+      data = await this.makeRequest('/league_tables', {
+        league_id: parseInt(leagueId),
+        limit: 100, // Essayer de récupérer jusqu'à 100 équipes
+        all: true   // Paramètre pour récupérer toutes les équipes
+      });
+    } catch (error) {
+      // Fallback vers la requête normale si les paramètres ne sont pas supportés
+      data = await this.makeRequest('/league_tables', { league_id: parseInt(leagueId) });
+    }
     
     if (!data || !Array.isArray(data)) {
       throw new Error(`Classement introuvable pour la ligue ${leagueId}`);
     }
-    
+
+    console.log(`📊 Classement ligue ${leagueId}: ${data.length} équipes récupérées`);
+
     // Trier par position actuelle
     const sortedTable = data.sort((a, b) => a.new_position - b.new_position);
     

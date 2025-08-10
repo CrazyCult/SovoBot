@@ -98,7 +98,9 @@ module.exports = {
       }
       
       // Récupérer le classement de la ligue
+      console.log(`🔍 Récupération classement pour ligue ${clubData.league_id}...`);
       const leagueTable = await apiClient.getLeagueTable(clubData.league_id);
+      console.log(`📊 Classement récupéré: ${leagueTable.length} équipes`);
       
       if (!leagueTable || leagueTable.length === 0) {
         const embed = new EmbedBuilder()
@@ -106,9 +108,14 @@ module.exports = {
           .setTitle('⚠️ Classement indisponible')
           .setDescription(`Aucun classement disponible pour la ligue de ${clubData.display_name}.`)
           .setFooter({ text: 'Soccerverse Bot v3.0' });
-        
+
         await message.reply({ embeds: [embed] });
         return;
+      }
+
+      // Avertir si le classement semble incomplet
+      if (leagueTable.length < 16) {
+        console.log(`⚠️ Classement possiblement incomplet: seulement ${leagueTable.length} équipes`);
       }
 
       // Trouver la position du club dans le classement
@@ -131,7 +138,7 @@ module.exports = {
         .setColor('#FFD700')
         .setTitle(`🏆 Classement - ${apiClient.getLeagueNameByCountryDivision(clubData.country_id, clubData.division)}`)
         .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
-        .setDescription(`**${clubData.display_name}** est actuellement **${targetClub.new_position}${this.getPositionSuffix(targetClub.new_position)}** sur ${leagueTable.length} équipes`);
+        .setDescription(`**${clubData.display_name}** est actuellement **${targetClub.new_position}${this.getPositionSuffix(targetClub.new_position)}** sur ${leagueTable.length} équipes${leagueTable.length < 16 ? ' ⚠️ (classement possiblement incomplet)' : ''}`);
 
       // Statistiques du club sélectionné
       embed.addFields({
@@ -144,46 +151,90 @@ module.exports = {
         inline: false
       });
 
-      // Afficher TOUT le classement avec pagination si nécessaire
-      const maxPerField = 10; // 10 équipes par field pour éviter les limites Discord
+      // Afficher le classement en 2 colonnes pour optimiser l'espace
       const totalTeams = leagueTable.length;
-      
-      // Calculer le nombre de champs nécessaires
-      const numFields = Math.ceil(totalTeams / maxPerField);
-      
-      for (let fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
-        const startIndex = fieldIndex * maxPerField;
-        const endIndex = Math.min(startIndex + maxPerField, totalTeams);
-        
-        let tableText = '';
-        
-        for (let i = startIndex; i < endIndex; i++) {
+      const teamsPerColumn = 10; // 10 équipes par colonne
+      const maxTeamsToShow = 40; // Maximum 40 équipes (4 colonnes de 10)
+
+      // Limiter le nombre d'équipes si nécessaire
+      const teamsToShow = Math.min(totalTeams, maxTeamsToShow);
+      const numColumns = Math.ceil(teamsToShow / teamsPerColumn);
+
+      // Créer les colonnes par paires
+      for (let pairIndex = 0; pairIndex < Math.ceil(numColumns / 2); pairIndex++) {
+        const leftColumnIndex = pairIndex * 2;
+        const rightColumnIndex = leftColumnIndex + 1;
+
+        // Colonne de gauche
+        const leftStart = leftColumnIndex * teamsPerColumn;
+        const leftEnd = Math.min(leftStart + teamsPerColumn, teamsToShow);
+        let leftColumnText = '';
+
+        for (let i = leftStart; i < leftEnd; i++) {
           const team = leagueTable[i];
           const clubName = apiClient.getClubName(team.club_id);
           const isTarget = team.club_id === clubId;
           const positionChange = this.getPositionChange(team.old_position, team.new_position);
-          
+
           // Mettre en évidence le club recherché
           const prefix = isTarget ? '**►** ' : '';
           const suffix = isTarget ? ' **◄**' : '';
-          
-          tableText += `${prefix}**${team.new_position}.** ${clubName}${suffix}\n`;
-          tableText += `   └ ${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} • ${team.goals_for}:${team.goals_against} ${positionChange}\n\n`;
+
+          leftColumnText += `${prefix}**${team.new_position}.** ${clubName}${suffix}\n`;
+          leftColumnText += `   └ ${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} ${positionChange}\n\n`;
         }
-        
-        // Nom du champ selon la position
-        let fieldName;
-        if (numFields === 1) {
-          fieldName = `📊 Classement complet (${totalTeams} équipes)`;
-        } else {
-          const rangeStart = startIndex + 1;
-          const rangeEnd = endIndex;
-          fieldName = `📊 Classement ${rangeStart}-${rangeEnd} (${totalTeams} équipes)`;
+
+        // Colonne de droite (si elle existe)
+        let rightColumnText = '';
+        if (rightColumnIndex < numColumns) {
+          const rightStart = rightColumnIndex * teamsPerColumn;
+          const rightEnd = Math.min(rightStart + teamsPerColumn, teamsToShow);
+
+          for (let i = rightStart; i < rightEnd; i++) {
+            const team = leagueTable[i];
+            const clubName = apiClient.getClubName(team.club_id);
+            const isTarget = team.club_id === clubId;
+            const positionChange = this.getPositionChange(team.old_position, team.new_position);
+
+            // Mettre en évidence le club recherché
+            const prefix = isTarget ? '**►** ' : '';
+            const suffix = isTarget ? ' **◄**' : '';
+
+            rightColumnText += `${prefix}**${team.new_position}.** ${clubName}${suffix}\n`;
+            rightColumnText += `   └ ${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} ${positionChange}\n\n`;
+          }
         }
-        
+
+        // Ajouter les champs (colonnes)
+        const leftRange = `${leftStart + 1}-${leftEnd}`;
         embed.addFields({
-          name: fieldName,
-          value: tableText || 'Aucune donnée',
+          name: `📊 Classement ${leftRange}`,
+          value: leftColumnText || 'Aucune donnée',
+          inline: true
+        });
+
+        if (rightColumnText) {
+          const rightRange = `${rightColumnIndex * teamsPerColumn + 1}-${rightColumnIndex * teamsPerColumn + Math.min(teamsPerColumn, teamsToShow - rightColumnIndex * teamsPerColumn)}`;
+          embed.addFields({
+            name: `📊 Classement ${rightRange}`,
+            value: rightColumnText,
+            inline: true
+          });
+        }
+
+        // Ajouter un champ vide pour forcer un retour à la ligne
+        embed.addFields({
+          name: '\u200B', // Caractère invisible
+          value: '\u200B',
+          inline: true
+        });
+      }
+
+      // Ajouter une note si le classement est tronqué
+      if (totalTeams > maxTeamsToShow) {
+        embed.addFields({
+          name: '📝 Note',
+          value: `Affichage des ${maxTeamsToShow} premières équipes sur ${totalTeams} au total.`,
           inline: false
         });
       }

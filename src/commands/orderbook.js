@@ -62,8 +62,14 @@ module.exports = {
     } else {
       // Arguments fournis
       clubId = parseInt(args[0]);
-      if (args[1]) minPrice = parseFloat(args[1]);
-      if (args[2]) maxPrice = parseFloat(args[2]);
+      if (args[1]) {
+        // Convertir les virgules en points pour les décimales
+        minPrice = parseFloat(args[1].replace(',', '.'));
+      }
+      if (args[2]) {
+        // Convertir les virgules en points pour les décimales
+        maxPrice = parseFloat(args[2].replace(',', '.'));
+      }
     }
     
     // Vérifier que l'ID est un nombre
@@ -276,6 +282,13 @@ module.exports = {
             orderbookWatching: orderbookWatching
           });
           
+          // Ajouter un message de confirmation de surveillance
+          embed.addFields({
+            name: '🔔 Surveillance activée !',
+            value: `La surveillance des ordres est maintenant active pour ce club.\nVous serez notifié des nouveaux ordres toutes les 1 minute.`,
+            inline: false
+          });
+
           actionRow.addComponents(
             new ButtonBuilder()
               .setCustomId(`orderbook_stop_${clubId}`)
@@ -283,6 +296,13 @@ module.exports = {
               .setStyle(ButtonStyle.Danger)
               .setEmoji('🔕')
           );
+        } else {
+          // Club pas inscrit - afficher un message d'erreur
+          embed.addFields({
+            name: '⚠️ Club non inscrit',
+            value: `Pour activer la surveillance, vous devez d'abord inscrire ce club :\n\`!inscription ${clubId}\`\n\nPuis relancer : \`!orderbook ${clubId} ${minPrice || ''} ${maxPrice || ''}\``,
+            inline: false
+          });
         }
       } else {
         // Affichage simple sans critères - proposer de surveiller

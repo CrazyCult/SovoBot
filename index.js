@@ -142,27 +142,31 @@ class SoccerverseBot {
           await this.handleWatchlistButton(interaction, params);
           break;
         default:
-          await interaction.reply({ 
-            content: '❌ Interaction non reconnue.', 
-            ephemeral: true 
+          await interaction.reply({
+            content: '❌ Interaction non reconnue.',
+            flags: 64 // Ephemeral flag
           });
       }
     } catch (error) {
       logger.error(`Erreur interaction ${action}:`, error);
-      if (!interaction.replied) {
-        await interaction.reply({ 
-          content: '❌ Une erreur est survenue.', 
-          ephemeral: true 
-        });
+      if (!interaction.replied && !interaction.deferred) {
+        try {
+          await interaction.reply({
+            content: '❌ Une erreur est survenue.',
+            flags: 64 // Ephemeral flag
+          });
+        } catch (replyError) {
+          logger.error('Erreur lors de la réponse d\'interaction:', replyError);
+        }
       }
     }
   }
 
   async handleRegisterButton(interaction, clubId) {
     if (!clubId) {
-      await interaction.reply({ 
-        content: '❌ ID de club manquant.', 
-        ephemeral: true 
+      await interaction.reply({
+        content: '❌ ID de club manquant.',
+        flags: 64 // Ephemeral flag
       });
       return;
     }
@@ -173,7 +177,7 @@ class SoccerverseBot {
     if (isRegistered) {
       await interaction.reply({ 
         content: '⚠️ Ce club est déjà enregistré dans ce salon.', 
-        ephemeral: true 
+        flags: 64 // Ephemeral flag 
       });
       return;
     }
@@ -183,7 +187,7 @@ class SoccerverseBot {
     
     await interaction.reply({ 
       content: `✅ Club ID ${clubId} enregistré ! Vous recevrez les notifications dans ce salon.`, 
-      ephemeral: true 
+      flags: 64 // Ephemeral flag 
     });
   }
 
@@ -194,7 +198,7 @@ class SoccerverseBot {
     if (!isRegistered) {
       await interaction.reply({ 
         content: '⚠️ Ce club n\'est pas enregistré dans ce salon.', 
-        ephemeral: true 
+        flags: 64 // Ephemeral flag 
       });
       return;
     }
@@ -204,7 +208,7 @@ class SoccerverseBot {
     
     await interaction.reply({ 
       content: `✅ Club ID ${clubId} retiré des notifications.`, 
-      ephemeral: true 
+      flags: 64 // Ephemeral flag 
     });
   }
 
@@ -223,7 +227,7 @@ class SoccerverseBot {
                    `• \`!orderbook ${clubId} 1000 5000\` - Surveiller les ordres entre 1000$ et 5000$\n` +
                    `• \`!orderbook ${clubId} 2000\` - Surveiller les ordres à partir de 2000$\n\n` +
                    '**Note :** La surveillance se déclenchera automatiquement quand vous utiliserez des critères de prix.',
-          ephemeral: true
+          flags: 64 // Ephemeral flag
         });
         break;
         
@@ -234,7 +238,7 @@ class SoccerverseBot {
           
           await interaction.reply({
             content: `✅ Surveillance des ordres arrêtée pour le club #${clubId}.`,
-            ephemeral: true
+            flags: 64 // Ephemeral flag
           });
         }
         break;
@@ -264,7 +268,7 @@ class SoccerverseBot {
         } catch (error) {
           await interaction.reply({
             content: '❌ Erreur lors de l\'actualisation de l\'orderbook.',
-            ephemeral: true
+            flags: 64 // Ephemeral flag
           });
         }
         break;
@@ -272,7 +276,7 @@ class SoccerverseBot {
       default:
         await interaction.reply({ 
           content: '❌ Action orderbook non reconnue.', 
-          ephemeral: true 
+          flags: 64 // Ephemeral flag 
         });
     }
   }
@@ -294,7 +298,7 @@ class SoccerverseBot {
         if (activeWatches.length === 0) {
           await interaction.reply({
             content: '⚠️ Aucune surveillance active à arrêter.',
-            ephemeral: true
+            flags: 64 // Ephemeral flag
           });
           return;
         }
@@ -309,7 +313,7 @@ class SoccerverseBot {
         
         await interaction.reply({
           content: `✅ ${activeWatches.length} surveillance(s) arrêtée(s) avec succès.`,
-          ephemeral: true
+          flags: 64 // Ephemeral flag
         });
         break;
         
@@ -337,7 +341,7 @@ class SoccerverseBot {
           logger.error('Erreur actualisation watchlist:', error);
           await interaction.reply({
             content: '❌ Erreur lors de l\'actualisation de la watchlist.',
-            ephemeral: true
+            flags: 64 // Ephemeral flag
           });
         }
         break;
@@ -345,7 +349,7 @@ class SoccerverseBot {
       default:
         await interaction.reply({ 
           content: '❌ Action watchlist non reconnue.', 
-          ephemeral: true 
+          flags: 64 // Ephemeral flag 
         });
     }
   }
