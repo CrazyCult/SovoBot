@@ -5,6 +5,7 @@ const path = require('path');
 const logger = require('./src/utils/logger');
 const DataManager = require('./src/data/DataManager');
 const ApiClient = require('./src/api/ApiClient');
+const OrderbookWatcher = require('./src/services/OrderbookWatcher');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -26,6 +27,9 @@ class SoccerverseBot {
     this.dataManager = new DataManager();
     this.apiClient = new ApiClient();
     this.commands = new Map();
+    
+    // Service de surveillance orderbook (sera initialisé après le login)
+    this.orderbookWatcher = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -60,6 +64,10 @@ class SoccerverseBot {
       
       // Définir le statut
       this.client.user.setActivity('⚽ Soccerverse | !help', { type: 'WATCHING' });
+      
+      // Initialiser le service de surveillance orderbook
+      this.orderbookWatcher = new OrderbookWatcher(this.client, this.dataManager, this.apiClient);
+      logger.info('📊 Service de surveillance orderbook initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -81,7 +89,8 @@ class SoccerverseBot {
       try {
         await command.execute(message, args, {
           apiClient: this.apiClient,
-          dataManager: this.dataManager
+          dataManager: this.dataManager,
+          orderbookWatcher: this.orderbookWatcher
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -125,6 +134,9 @@ class SoccerverseBot {
           break;
         case 'unregister':
           await this.handleUnregisterButton(interaction, params[0]);
+          break;
+        case 'orderbook':
+          await this.handleOrderbookButton(interaction, params);
           break;
         default:
           await interaction.reply({ 
@@ -193,15 +205,23 @@ class SoccerverseBot {
     });
   }
 
-  async start() {
-    await this.initialize();
-    await this.client.login(process.env.DISCORD_TOKEN);
-  }
-}
+  async handleOrderbookButton(interaction, params) {
+    const [action, clubId] = params;
+    const channelId = interaction.channel.id;
+    
+    switch (action) {
+      case 'watch':
+        // Demander les critères de surveillance
+        await interaction.reply({
+          content: '🔍 **Configurer la surveillance des ordres**\n\n' +
+                   'Utilisez la commande suivante pour définir vos critères :\n' +
+                   `\`!orderbook ${clubId} <prix_min> <prix_max>\`\n\n` +
+                   '**Exemples :**\n' +
+                   `• \`!orderbook ${clubId} 1000 5000\` - Surveiller les ordres entre 1000$ et 5000$\n` +
+                   `• \`!orderbook ${clubId} 2000\` - Surveiller les ordres à partir de 2000# 🔄 Guide de mise à jour GitHub - Commande Orderbook
 
-// Démarrer le bot
-const bot = new SoccerverseBot();
-bot.start().catch(error => {
-  logger.error('❌ Erreur fatale:', error);
-  process.exit(1);
-});
+## 📁 Structure des fichiers à ajouter/modifier
+
+### 1. Créer le dossier services
+```bash
+mkdir src/services
