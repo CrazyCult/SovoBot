@@ -144,36 +144,46 @@ module.exports = {
         inline: false
       });
 
-      // Afficher le top 10 du classement
-      let tableText = '';
-      const showCount = Math.min(15, leagueTable.length);
+      // Afficher TOUT le classement avec pagination si nécessaire
+      const maxPerField = 10; // 10 équipes par field pour éviter les limites Discord
+      const totalTeams = leagueTable.length;
       
-      for (let i = 0; i < showCount; i++) {
-        const team = leagueTable[i];
-        const clubName = apiClient.getClubName(team.club_id);
-        const isTarget = team.club_id === clubId;
-        const positionChange = this.getPositionChange(team.old_position, team.new_position);
+      // Calculer le nombre de champs nécessaires
+      const numFields = Math.ceil(totalTeams / maxPerField);
+      
+      for (let fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
+        const startIndex = fieldIndex * maxPerField;
+        const endIndex = Math.min(startIndex + maxPerField, totalTeams);
         
-        // Mettre en évidence le club recherché
-        const prefix = isTarget ? '**►** ' : '';
-        const suffix = isTarget ? ' **◄**' : '';
+        let tableText = '';
         
-        tableText += `${prefix}**${team.new_position}.** ${clubName}${suffix}\n`;
-        tableText += `   └ ${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} • ${team.goals_for}:${team.goals_against} ${positionChange}\n\n`;
-      }
-
-      embed.addFields({
-        name: `📊 Top ${showCount} du classement`,
-        value: tableText || 'Aucune donnée',
-        inline: false
-      });
-
-      // Si le club n'est pas dans le top 15, afficher sa position
-      if (targetClub.new_position > 15) {
+        for (let i = startIndex; i < endIndex; i++) {
+          const team = leagueTable[i];
+          const clubName = apiClient.getClubName(team.club_id);
+          const isTarget = team.club_id === clubId;
+          const positionChange = this.getPositionChange(team.old_position, team.new_position);
+          
+          // Mettre en évidence le club recherché
+          const prefix = isTarget ? '**►** ' : '';
+          const suffix = isTarget ? ' **◄**' : '';
+          
+          tableText += `${prefix}**${team.new_position}.** ${clubName}${suffix}\n`;
+          tableText += `   └ ${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} • ${team.goals_for}:${team.goals_against} ${positionChange}\n\n`;
+        }
+        
+        // Nom du champ selon la position
+        let fieldName;
+        if (numFields === 1) {
+          fieldName = `📊 Classement complet (${totalTeams} équipes)`;
+        } else {
+          const rangeStart = startIndex + 1;
+          const rangeEnd = endIndex;
+          fieldName = `📊 Classement ${rangeStart}-${rangeEnd} (${totalTeams} équipes)`;
+        }
+        
         embed.addFields({
-          name: '📍 Position actuelle',
-          value: `**${targetClub.new_position}.** ${clubData.display_name}\n` +
-                 `└ ${targetClub.pts}pts • ${targetClub.won}-${targetClub.drawn}-${targetClub.lost} • ${targetClub.goals_for}:${targetClub.goals_against} ${this.getPositionChange(targetClub.old_position, targetClub.new_position)}`,
+          name: fieldName,
+          value: tableText || 'Aucune donnée',
           inline: false
         });
       }
