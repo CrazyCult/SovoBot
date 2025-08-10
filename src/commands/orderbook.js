@@ -145,6 +145,11 @@ module.exports = {
         }
       }
 
+      // Vérifier si une surveillance est déjà active pour ce club
+      const settings = dataManager.getChannelSettings(channelId);
+      const orderbookWatching = settings.orderbookWatching || {};
+      const isWatched = orderbookWatching[clubId] && orderbookWatching[clubId].enabled;
+
       // Créer l'embed principal
       const embed = new EmbedBuilder()
         .setColor('#9B59B6')
@@ -161,6 +166,23 @@ module.exports = {
         embed.addFields({
           name: '🔍 Filtrage',
           value: filterText,
+          inline: false
+        });
+      }
+
+      // Afficher l'état de surveillance si active
+      if (isWatched) {
+        const watchConfig = orderbookWatching[clubId];
+        let watchText = '🔔 **Surveillance active**';
+        if (watchConfig.minPrice || watchConfig.maxPrice) {
+          watchText += ' - Critères: ';
+          if (watchConfig.minPrice) watchText += `Min: ${(watchConfig.minPrice / 10000).toLocaleString()}$ `;
+          if (watchConfig.maxPrice) watchText += `Max: ${(watchConfig.maxPrice / 10000).toLocaleString()}$`;
+        }
+        
+        embed.addFields({
+          name: '👁️ Surveillance',
+          value: watchText,
           inline: false
         });
       }
@@ -235,7 +257,7 @@ module.exports = {
       // Ajouter des boutons d'action
       const actionRow = new ActionRowBuilder();
       
-      // Bouton pour surveiller les ordres
+      // NOUVEAU COMPORTEMENT: Activer surveillance SEULEMENT si des critères sont fournis
       if (minPrice !== null || maxPrice !== null) {
         const isRegistered = dataManager.isTeamRegistered(channelId, clubId);
         if (isRegistered) {
@@ -244,9 +266,10 @@ module.exports = {
           const orderbookWatching = currentSettings.orderbookWatching || {};
           
           orderbookWatching[clubId] = {
-            minPrice: minPrice * 10000, // Convertir en format API
-            maxPrice: maxPrice * 10000,
-            enabled: true
+            minPrice: minPrice ? minPrice * 10000 : undefined,
+            maxPrice: maxPrice ? maxPrice * 10000 : undefined,
+            enabled: true,
+            startedAt: Date.now()
           };
           
           dataManager.setChannelSettings(channelId, {
@@ -262,13 +285,26 @@ module.exports = {
           );
         }
       } else {
-        actionRow.addComponents(
-          new ButtonBuilder()
-            .setCustomId(`orderbook_watch_${clubId}`)
-            .setLabel('Surveiller ce club')
-            .setStyle(ButtonStyle.Primary)
-            .setEmoji('👁️')
-        );
+        // Affichage simple sans critères - proposer de surveiller
+        if (isWatched) {
+          // Surveillance déjà active, proposer de l'arrêter
+          actionRow.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`orderbook_stop_${clubId}`)
+              .setLabel('Arrêter la surveillance')
+              .setStyle(ButtonStyle.Danger)
+              .setEmoji('🔕')
+          );
+        } else {
+          // Pas de surveillance, proposer d'en créer une
+          actionRow.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`orderbook_watch_${clubId}`)
+              .setLabel('Surveiller ce club')
+              .setStyle(ButtonStyle.Primary)
+              .setEmoji('👁️')
+          );
+        }
       }
 
       actionRow.addComponents(
@@ -310,7 +346,7 @@ module.exports = {
     try {
       const axios = require('axios');
       
-      // Liste des proxies CORS à essayer (comme dans le code HTML)
+      // Liste des proxies CORS à essayer
       const proxies = [
         'https://api.allorigins.win/raw?url=',
         'https://cors-anywhere.herokuapp.com/',
