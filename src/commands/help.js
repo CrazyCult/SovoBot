@@ -17,7 +17,18 @@ module.exports = {
             '**`!inscription <club_id>`** - S\'inscrire aux notifications d\'un club\n' +
             '**`!desinscription [club_id]`** - Se désinscrire des notifications\n' +
             '**`!club [id|nom]`** - Voir les infos d\'un club ou des clubs inscrits\n' +
+            '**`!matchs [club_id]`** - Voir les matchs d\'un club (dernier et prochain)\n' +
+            '**`!calendrier [club_id]`** - Voir le calendrier des prochains matchs\n' +
+            '**`!classement [club_id]`** - Voir le classement de la ligue\n' +
             '**`!help`** - Afficher cette aide',
+          inline: false
+        },
+        {
+          name: '⚙️ Commandes admin',
+          value: 
+            '**`!notifications [status|test|reset]`** - Gérer les notifications (admin)\n' +
+            '**`!update`** - Mettre à jour les mappings (admin)\n' +
+            '**`!reload <commande>`** - Recharger une commande (admin)',
           inline: false
         },
         {
@@ -27,14 +38,17 @@ module.exports = {
             '`!club 2180` - Voir les infos du club ID 2180\n' +
             '`!club Arsenal` - Rechercher des clubs nommés "Arsenal"\n' +
             '`!club` - Voir tous les clubs inscrits dans ce salon\n' +
-            '`!desinscription 2180` - Se désinscrire du club ID 2180',
+            '`!matchs` - Voir les matchs du club inscrit\n' +
+            '`!calendrier 2180 10` - Voir 10 prochains matchs du club\n' +
+            '`!classement` - Voir le classement de la ligue du club inscrit',
           inline: false
         },
         {
           name: '🔔 Fonctionnement des notifications',
           value: 
-            '• **Par salon :** Chaque salon Discord peut s\'inscrire à ses propres clubs\n' +
             '• **Notifications automatiques :** Vous recevrez des alertes pour les matchs\n' +
+            '• **Deadlines de composition :** Rappels 6h/3h/1h avant la deadline\n' +
+            '• **Par salon :** Chaque salon Discord peut s\'inscrire à ses propres clubs\n' +
             '• **Plusieurs clubs :** Vous pouvez suivre plusieurs clubs par salon',
           inline: false
         },
