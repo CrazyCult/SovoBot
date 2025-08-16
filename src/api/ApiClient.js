@@ -71,6 +71,21 @@ class ApiClient {
     return this.mappingManager.getCupName(cupId);
   }
 
+  // =================== UTILITAIRES LIENS ===================
+  
+  getSoccerverseClubLink(clubId) {
+    return `https://play.soccerverse.com/club/${clubId}`;
+  }
+  
+  formatClubLink(clubId, clubName) {
+    return `[${clubName}](https://play.soccerverse.com/club/${clubId})`;
+  }
+
+  formatClubLinkMarkdown(clubId, clubName = null) {
+    const name = clubName || this.getClubName(clubId);
+    return `[${name}](https://play.soccerverse.com/club/${clubId})`;
+  }
+
   // =================== REQUÊTES API ===================
   
   async makeRequest(endpoint, params = {}) {
