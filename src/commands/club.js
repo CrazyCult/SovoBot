@@ -64,6 +64,11 @@ module.exports = {
           .setDescription('✅ **Inscrit aux notifications**')
           .addFields(
             {
+              name: '🔗 Lien direct',
+              value: `[Voir sur Soccerverse](https://play.soccerverse.com/club/${clubId})`,
+              inline: false
+            },
+            {
               name: '📊 Infos générales',
               value: `**ID:** ${clubData.club_id}\n**Entraîneur:** ${clubData.manager_name}\n**Pays:** ${apiClient.formatCountryName(clubData.country_id)}\n**Division:** ${clubData.division + 1}`,
               inline: true
@@ -148,6 +153,11 @@ module.exports = {
         .setTitle(`🏟️ ${clubData.display_name}`)
         .setDescription(isRegistered ? '✅ **Inscrit aux notifications**' : 'Non inscrit aux notifications')
         .addFields(
+          {
+            name: '🔗 Lien direct',
+            value: `[Voir sur Soccerverse](https://play.soccerverse.com/club/${clubId})`,
+            inline: false
+          },
           {
             name: '📊 Infos générales',
             value: `**ID:** ${clubData.club_id}\n**Entraîneur:** ${clubData.manager_name}\n**Pays:** ${apiClient.formatCountryName(clubData.country_id)}\n**Division:** ${clubData.division + 1}`,
@@ -278,7 +288,8 @@ module.exports = {
         
         resultsList += `${status} **${club.display_name}**\n`;
         resultsList += `   └ ID: ${club.club_id} • Manager: ${club.manager_name}\n`;
-        resultsList += `   └ ${apiClient.formatMoney(club.balance)} • ${apiClient.formatForm(club.form)}\n\n`;
+        resultsList += `   └ ${apiClient.formatMoney(club.balance)} • ${apiClient.formatForm(club.form)}\n`;
+        resultsList += `   └ [Voir sur Soccerverse](https://play.soccerverse.com/club/${club.club_id})\n\n`;
       }
 
       embed.addFields({
