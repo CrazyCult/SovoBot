@@ -6,6 +6,7 @@ const logger = require('./src/utils/logger');
 const DataManager = require('./src/data/DataManager');
 const ApiClient = require('./src/api/ApiClient');
 const OrderbookWatcher = require('./src/services/OrderbookWatcher');
+const MatchNotificationWatcher = require('./src/services/MatchNotificationWatcher');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -30,6 +31,9 @@ class SoccerverseBot {
     
     // Service de surveillance orderbook (sera initialisé après le login)
     this.orderbookWatcher = null;
+    
+    // Service de surveillance des notifications de match (sera initialisé après le login)
+    this.matchNotificationWatcher = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -68,6 +72,10 @@ class SoccerverseBot {
       // Initialiser le service de surveillance orderbook
       this.orderbookWatcher = new OrderbookWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('📊 Service de surveillance orderbook initialisé');
+      
+      // Initialiser le service de surveillance des notifications de match
+      this.matchNotificationWatcher = new MatchNotificationWatcher(this.client, this.dataManager, this.apiClient);
+      logger.info('⚽ Service de notifications de match initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -90,7 +98,8 @@ class SoccerverseBot {
         await command.execute(message, args, {
           apiClient: this.apiClient,
           dataManager: this.dataManager,
-          orderbookWatcher: this.orderbookWatcher
+          orderbookWatcher: this.orderbookWatcher,
+          matchNotificationWatcher: this.matchNotificationWatcher
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -262,7 +271,8 @@ class SoccerverseBot {
             await orderbookCommand.execute(simulatedMessage, [clubId], {
               apiClient: this.apiClient,
               dataManager: this.dataManager,
-              orderbookWatcher: this.orderbookWatcher
+              orderbookWatcher: this.orderbookWatcher,
+              matchNotificationWatcher: this.matchNotificationWatcher
             });
           }
         } catch (error) {
@@ -334,7 +344,8 @@ class SoccerverseBot {
             await watchlistCommand.execute(simulatedMessage, [], {
               apiClient: this.apiClient,
               dataManager: this.dataManager,
-              orderbookWatcher: this.orderbookWatcher
+              orderbookWatcher: this.orderbookWatcher,
+              matchNotificationWatcher: this.matchNotificationWatcher
             });
           }
         } catch (error) {
