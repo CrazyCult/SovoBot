@@ -68,7 +68,10 @@ class MatchResultWatcher {
       
       const matchTime = new Date(nextMatch.date * 1000);
       const now = new Date();
-      const checkTime = new Date(matchTime.getTime() + this.resultDelay); // +1 minute
+      
+      // NOUVEAU: Ajouter un délai aléatoire pour éviter le spam simultané
+      const randomDelay = Math.floor(Math.random() * 300000); // 0-5 minutes aléatoire
+      const checkTime = new Date(matchTime.getTime() + this.resultDelay + randomDelay);
       
       // Seulement programmer si le match est dans les prochaines 24h
       const timeDiff = matchTime.getTime() - now.getTime();
@@ -80,13 +83,15 @@ class MatchResultWatcher {
       const delayUntilCheck = checkTime.getTime() - now.getTime();
       
       if (delayUntilCheck > 0 && delayUntilCheck <= 24 * 60 * 60 * 1000) {
-        // Programmer la vérification exacte
+        // Programmer la vérification avec délai aléatoire
         setTimeout(async () => {
           logger.info(`⏰ Vérification programmée pour club ${clubId} - Match: ${matchTime.toLocaleString('fr-FR')}`);
           await this.checkSpecificClubResult(clubId, nextMatch.fixture_id || nextMatch.date);
         }, delayUntilCheck);
         
-        logger.debug(`📅 Vérification programmée pour club ${clubId} dans ${Math.round(delayUntilCheck / 60000)} minutes`);
+        const delayMinutes = Math.round(delayUntilCheck / 60000);
+        const randomMinutes = Math.round(randomDelay / 60000);
+        logger.debug(`📅 Club ${clubId}: vérification dans ${delayMinutes}min (délai anti-spam: +${randomMinutes}min)`);
       }
       
     } catch (error) {
@@ -96,6 +101,10 @@ class MatchResultWatcher {
 
   async checkSpecificClubResult(clubId, expectedMatchId) {
     try {
+      // NOUVEAU: Ajouter un délai avant la requête pour éviter le spam
+      const randomWait = Math.floor(Math.random() * 10000); // 0-10 secondes
+      await new Promise(resolve => setTimeout(resolve, randomWait));
+      
       // Récupérer le dernier match du club
       const lastMatch = await this.apiClient.getClubLastMatch(clubId);
       
@@ -114,10 +123,11 @@ class MatchResultWatcher {
       // Vérifier si le match est terminé
       if (lastMatch.played !== 1) {
         logger.debug(`Match ${matchId} pas encore terminé pour club ${clubId}, re-programmer dans 5 minutes`);
-        // Re-programmer dans 5 minutes si pas encore terminé
+        // Re-programmer dans 5 minutes avec nouveau délai aléatoire
+        const retryDelay = (5 * 60 * 1000) + Math.floor(Math.random() * 60000); // 5-6 minutes
         setTimeout(async () => {
           await this.checkSpecificClubResult(clubId, expectedMatchId);
-        }, 5 * 60 * 1000);
+        }, retryDelay);
         return;
       }
       
@@ -140,7 +150,16 @@ class MatchResultWatcher {
       await this.sendMatchResultNotification(clubId, lastMatch);
       
     } catch (error) {
-      logger.error(`Erreur vérification spécifique club ${clubId}:`, error);
+      // Si erreur 429 ou timeout, re-programmer plus tard
+      if (error.message.includes('429') || error.message.includes('timeout')) {
+        const retryDelay = (10 * 60 * 1000) + Math.floor(Math.random() * 300000); // 10-15 minutes
+        logger.warn(`Rate limit/timeout pour club ${clubId}, retry dans ${Math.round(retryDelay/60000)} minutes`);
+        setTimeout(async () => {
+          await this.checkSpecificClubResult(clubId, expectedMatchId);
+        }, retryDelay);
+      } else {
+        logger.error(`Erreur vérification spécifique club ${clubId}:`, error);
+      }
     }
   }
 
