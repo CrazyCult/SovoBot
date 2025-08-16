@@ -10,30 +10,33 @@ class MatchResultWatcher {
     // Cache des matchs en cours pour éviter les doublons
     this.processedMatches = new Map();
     
-    // Intervalle de vérification (toutes les 2 minutes)
-    this.checkInterval = 2 * 60 * 1000;
+    // Intervalle de vérification rapide (toutes les 15 secondes)
+    this.checkInterval = 15 * 1000;
     
     // Délai après début du match pour récupérer le résultat (1 minute)
     this.resultDelay = 1 * 60 * 1000;
+    
+    // Map des timers programmés pour éviter les doublons
+    this.scheduledChecks = new Map();
     
     this.startWatching();
   }
 
   startWatching() {
-    // Vérification initiale après 1 minute
+    // Vérification initiale après 30 secondes
     setTimeout(() => {
-      this.scheduleNextChecks();
-    }, 60000);
+      this.checkRecentMatches();
+    }, 30000);
     
-    // Puis re-programmer toutes les heures pour recalculer les prochains matchs
+    // Puis vérification toutes les 15 secondes
     setInterval(() => {
-      this.scheduleNextChecks();
-    }, 60 * 60 * 1000); // Toutes les heures
+      this.checkRecentMatches();
+    }, this.checkInterval);
     
-    logger.info('⚽ Surveillance des résultats de match démarrée (programmation intelligente)');
+    logger.info('⚽ Surveillance des résultats de match démarrée (vérification toutes les 15 secondes)');
   }
 
-  async scheduleNextChecks() {
+  async checkRecentMatches() {
     try {
       const registeredClubs = this.dataManager.getAllRegisteredClubs();
       
@@ -41,124 +44,79 @@ class MatchResultWatcher {
         return;
       }
       
-      logger.debug(`📅 Programmation des vérifications pour ${registeredClubs.length} club(s)`);
+      logger.debug(`⚽ Vérification résultats récents pour ${registeredClubs.length} club(s)`);
       
       for (const clubId of registeredClubs) {
         try {
-          await this.scheduleClubResultCheck(parseInt(clubId));
-          await new Promise(resolve => setTimeout(resolve, 1000)); // 1s entre chaque club
+          await this.checkClubRecentResult(parseInt(clubId));
+          // Attendre 1 seconde entre chaque club
+          await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (error) {
-          logger.error(`Erreur programmation club ${clubId}:`, error);
+          logger.error(`Erreur vérification club ${clubId}:`, error);
         }
       }
       
+      // Nettoyer les anciens matchs du cache
+      this.cleanupProcessedMatches();
+      
     } catch (error) {
-      logger.error('Erreur programmation vérifications:', error);
+      logger.error('Erreur surveillance résultats globale:', error);
     }
   }
 
-  async scheduleClubResultCheck(clubId) {
+  async checkClubRecentResult(clubId) {
     try {
-      // Récupérer le prochain match du club
-      const nextMatch = await this.apiClient.getClubNextMatch(clubId);
-      
-      if (!nextMatch) {
-        return;
-      }
-      
-      const matchTime = new Date(nextMatch.date * 1000);
-      const now = new Date();
-      
-      // NOUVEAU: Ajouter un délai aléatoire pour éviter le spam simultané
-      const randomDelay = Math.floor(Math.random() * 300000); // 0-5 minutes aléatoire
-      const checkTime = new Date(matchTime.getTime() + this.resultDelay + randomDelay);
-      
-      // Seulement programmer si le match est dans les prochaines 24h
-      const timeDiff = matchTime.getTime() - now.getTime();
-      if (timeDiff <= 0 || timeDiff > 24 * 60 * 60 * 1000) {
-        return;
-      }
-      
-      // Calculer le délai jusqu'à la vérification
-      const delayUntilCheck = checkTime.getTime() - now.getTime();
-      
-      if (delayUntilCheck > 0 && delayUntilCheck <= 24 * 60 * 60 * 1000) {
-        // Programmer la vérification avec délai aléatoire
-        setTimeout(async () => {
-          logger.info(`⏰ Vérification programmée pour club ${clubId} - Match: ${matchTime.toLocaleString('fr-FR')}`);
-          await this.checkSpecificClubResult(clubId, nextMatch.fixture_id || nextMatch.date);
-        }, delayUntilCheck);
-        
-        const delayMinutes = Math.round(delayUntilCheck / 60000);
-        const randomMinutes = Math.round(randomDelay / 60000);
-        logger.debug(`📅 Club ${clubId}: vérification dans ${delayMinutes}min (délai anti-spam: +${randomMinutes}min)`);
-      }
-      
-    } catch (error) {
-      logger.error(`Erreur programmation club ${clubId}:`, error);
-    }
-  }
-
-  async checkSpecificClubResult(clubId, expectedMatchId) {
-    try {
-      // NOUVEAU: Ajouter un délai avant la requête pour éviter le spam
-      const randomWait = Math.floor(Math.random() * 10000); // 0-10 secondes
-      await new Promise(resolve => setTimeout(resolve, randomWait));
-      
       // Récupérer le dernier match du club
       const lastMatch = await this.apiClient.getClubLastMatch(clubId);
       
       if (!lastMatch) {
-        logger.debug(`Aucun dernier match trouvé pour club ${clubId}`);
         return;
       }
       
-      // Vérifier si c'est bien le match attendu
-      const matchId = lastMatch.fixture_id || lastMatch.date;
-      if (matchId !== expectedMatchId) {
-        logger.debug(`Match différent de celui attendu pour club ${clubId}: ${matchId} vs ${expectedMatchId}`);
+      const matchTime = new Date(lastMatch.date * 1000);
+      const now = new Date();
+      
+      // Vérifier si le match vient de se terminer (entre 1 minute et 2 heures)
+      const timeSinceMatchStart = now.getTime() - matchTime.getTime();
+      const minDelay = this.resultDelay; // 1 minute
+      const maxDelay = 2 * 60 * 60 * 1000; // 2 heures
+      
+      // Ne traiter que les matchs récents
+      if (timeSinceMatchStart < minDelay || timeSinceMatchStart > maxDelay) {
         return;
       }
       
       // Vérifier si le match est terminé
       if (lastMatch.played !== 1) {
-        logger.debug(`Match ${matchId} pas encore terminé pour club ${clubId}, re-programmer dans 5 minutes`);
-        // Re-programmer dans 5 minutes avec nouveau délai aléatoire
-        const retryDelay = (5 * 60 * 1000) + Math.floor(Math.random() * 60000); // 5-6 minutes
-        setTimeout(async () => {
-          await this.checkSpecificClubResult(clubId, expectedMatchId);
-        }, retryDelay);
+        logger.debug(`Match ${lastMatch.date} club ${clubId} pas encore terminé`);
         return;
       }
       
       // Créer une clé unique pour ce match
-      const matchKey = `${clubId}_${matchId}_${lastMatch.home_goals}_${lastMatch.away_goals}`;
+      const matchKey = `${clubId}_${lastMatch.fixture_id || lastMatch.date}_${lastMatch.home_goals}_${lastMatch.away_goals}`;
       
       // Vérifier si on a déjà envoyé la notification
       if (this.processedMatches.has(matchKey)) {
-        logger.debug(`Notification déjà envoyée pour ${matchKey}`);
         return;
       }
       
-      // Marquer comme traité et envoyer la notification
+      // Marquer comme traité
       this.processedMatches.set(matchKey, {
         timestamp: Date.now(),
         clubId: clubId,
         matchData: lastMatch
       });
       
+      logger.info(`🏆 Nouveau résultat détecté: Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
+      
+      // Envoyer la notification
       await this.sendMatchResultNotification(clubId, lastMatch);
       
     } catch (error) {
-      // Si erreur 429 ou timeout, re-programmer plus tard
       if (error.message.includes('429') || error.message.includes('timeout')) {
-        const retryDelay = (10 * 60 * 1000) + Math.floor(Math.random() * 300000); // 10-15 minutes
-        logger.warn(`Rate limit/timeout pour club ${clubId}, retry dans ${Math.round(retryDelay/60000)} minutes`);
-        setTimeout(async () => {
-          await this.checkSpecificClubResult(clubId, expectedMatchId);
-        }, retryDelay);
+        logger.warn(`Rate limit/timeout pour club ${clubId}, ignorer cette fois`);
       } else {
-        logger.error(`Erreur vérification spécifique club ${clubId}:`, error);
+        logger.error(`Erreur vérification club ${clubId}:`, error);
       }
     }
   }
@@ -307,19 +265,20 @@ class MatchResultWatcher {
   getResultStats() {
     return {
       processedMatchesCount: this.processedMatches.size,
-      schedulingInterval: '1 heure', // Reprogrammation
+      checkInterval: this.checkInterval / 60000, // en minutes
       resultDelay: this.resultDelay / 60000, // en minutes
-      method: 'Programmation précise basée sur les horaires de match'
+      method: 'Vérification cyclique toutes les 3 minutes'
     };
   }
 
   async forceCheckResults() {
     logger.info('🔄 Vérification forcée des résultats de match...');
-    await this.scheduleNextChecks();
+    await this.checkRecentMatches();
   }
 
   resetResultCache() {
     this.processedMatches.clear();
+    this.scheduledChecks.clear();
     logger.info('🔄 Cache des résultats réinitialisé');
   }
 
