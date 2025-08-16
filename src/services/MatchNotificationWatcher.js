@@ -199,11 +199,8 @@ class MatchNotificationWatcher {
         },
         {
           name: '📝 Action requise',
-          value: '🔗 **[Faire la composition sur Soccerverse.io](https://soccerverse.io)**\n\n' +
-                 '• Vérifiez votre formation\n' +
-                 '• Définissez votre tactique\n' +
-                 '• Sélectionnez vos remplaçants\n' +
-                 '• Confirmez votre composition',
+          value: `🔗 **[Faire la composition sur Soccerverse](https://play.soccerverse.com/club/${clubId})**\n\n` +
+                 
           inline: false
         }
       )
