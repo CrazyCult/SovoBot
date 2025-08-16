@@ -200,7 +200,10 @@ class MatchNotificationWatcher {
         {
           name: '📝 Action requise',
           value: `🔗 **[Faire la composition sur Soccerverse](https://play.soccerverse.com/club/${clubId})**\n\n` +
-                 
+                 '• Vérifiez votre formation\n' +
+                 '• Définissez votre tactique\n' +
+                 '• Sélectionnez vos remplaçants\n' +
+                 '• Confirmez votre composition',
           inline: false
         }
       )
