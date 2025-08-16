@@ -112,35 +112,42 @@ module.exports = {
         .setDescription(`**${upcomingMatches.length}** match(s) surveillé(s) dans les 7 prochains jours`)
         .setTimestamp();
 
-      // Diviser en groupes de 10 matchs maximum par embed
-      const maxMatchesPerEmbed = 10;
+      // Limiter à 5 matchs pour éviter de dépasser la limite Discord de 1024 caractères
+      const maxMatchesPerEmbed = 5;
       const matchesToShow = upcomingMatches.slice(0, maxMatchesPerEmbed);
 
-      let matchList = '';
-      const now = new Date();
-
-      for (let i = 0; i < matchesToShow.length; i++) {
-        const match = matchesToShow[i];
-        const timeUntilMatch = match.matchTime.getTime() - now.getTime();
-        const timeUntilResult = match.resultTime.getTime() - now.getTime();
+      if (matchesToShow.length > 0) {
+        // Diviser en plusieurs fields si nécessaire
+        const matchesPerField = 3; // Max 3 matchs par field
+        const fields = [];
         
-        const hoursUntilMatch = Math.round(timeUntilMatch / (1000 * 60 * 60));
-        const hoursUntilResult = Math.round(timeUntilResult / (1000 * 60 * 60));
-        
-        const venue = match.isHome ? '🏟️' : '✈️';
-        const opponent = match.isHome ? match.awayClub : match.homeClub;
-        
-        matchList += `**${i + 1}.** ${venue} **${match.clubName}** vs **${opponent}**\n`;
-        matchList += `   📅 ${match.matchTime.toLocaleDateString('fr-FR')} à ${match.matchTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}\n`;
-        matchList += `   ⏰ Match dans ${hoursUntilMatch}h • Résultat dans ${hoursUntilResult}h\n`;
-        matchList += `   🏆 ${match.competition}\n\n`;
+        for (let i = 0; i < matchesToShow.length; i += matchesPerField) {
+          const fieldMatches = matchesToShow.slice(i, i + matchesPerField);
+          let fieldContent = '';
+          const now = new Date();
+          
+          for (let j = 0; j < fieldMatches.length; j++) {
+            const match = fieldMatches[j];
+            const timeUntilMatch = match.matchTime.getTime() - now.getTime();
+            const hoursUntilMatch = Math.round(timeUntilMatch / (1000 * 60 * 60));
+            
+            const venue = match.isHome ? '🏟️' : '✈️';
+            const opponent = match.isHome ? match.awayClub : match.homeClub;
+            
+            // Format plus compact
+            fieldContent += `**${i + j + 1}.** ${venue} ${match.clubName} vs ${opponent}\n`;
+            fieldContent += `📅 ${match.matchTime.toLocaleDateString('fr-FR')} ${match.matchTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} (${hoursUntilMatch}h)\n\n`;
+          }
+          
+          const fieldName = i === 0 ? '📋 Prochains matchs surveillés' : `📋 Suite (${i + 1}-${Math.min(i + matchesPerField, matchesToShow.length)})`;
+          
+          resultsEmbed.addFields({
+            name: fieldName,
+            value: fieldContent.trim(),
+            inline: false
+          });
+        }
       }
-
-      resultsEmbed.addFields({
-        name: '📋 Planning des notifications',
-        value: matchList || 'Aucun match',
-        inline: false
-      });
 
       if (upcomingMatches.length > maxMatchesPerEmbed) {
         resultsEmbed.addFields({
