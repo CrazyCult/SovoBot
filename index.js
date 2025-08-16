@@ -7,6 +7,7 @@ const DataManager = require('./src/data/DataManager');
 const ApiClient = require('./src/api/ApiClient');
 const OrderbookWatcher = require('./src/services/OrderbookWatcher');
 const MatchNotificationWatcher = require('./src/services/MatchNotificationWatcher');
+const MatchResultWatcher = require('./src/services/MatchResultWatcher');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -29,11 +30,10 @@ class SoccerverseBot {
     this.apiClient = new ApiClient();
     this.commands = new Map();
     
-    // Service de surveillance orderbook (sera initialisé après le login)
+    // Services de surveillance (seront initialisés après le login)
     this.orderbookWatcher = null;
-    
-    // Service de surveillance des notifications de match (sera initialisé après le login)
     this.matchNotificationWatcher = null;
+    this.matchResultWatcher = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -76,6 +76,10 @@ class SoccerverseBot {
       // Initialiser le service de surveillance des notifications de match
       this.matchNotificationWatcher = new MatchNotificationWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('⚽ Service de notifications de match initialisé');
+      
+      // Initialiser le service de surveillance des résultats de match
+      this.matchResultWatcher = new MatchResultWatcher(this.client, this.dataManager, this.apiClient);
+      logger.info('🏆 Service de notifications de résultats initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -99,7 +103,8 @@ class SoccerverseBot {
           apiClient: this.apiClient,
           dataManager: this.dataManager,
           orderbookWatcher: this.orderbookWatcher,
-          matchNotificationWatcher: this.matchNotificationWatcher
+          matchNotificationWatcher: this.matchNotificationWatcher,
+          matchResultWatcher: this.matchResultWatcher
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -272,7 +277,8 @@ class SoccerverseBot {
               apiClient: this.apiClient,
               dataManager: this.dataManager,
               orderbookWatcher: this.orderbookWatcher,
-              matchNotificationWatcher: this.matchNotificationWatcher
+              matchNotificationWatcher: this.matchNotificationWatcher,
+              matchResultWatcher: this.matchResultWatcher
             });
           }
         } catch (error) {
@@ -345,7 +351,8 @@ class SoccerverseBot {
               apiClient: this.apiClient,
               dataManager: this.dataManager,
               orderbookWatcher: this.orderbookWatcher,
-              matchNotificationWatcher: this.matchNotificationWatcher
+              matchNotificationWatcher: this.matchNotificationWatcher,
+              matchResultWatcher: this.matchResultWatcher
             });
           }
         } catch (error) {
