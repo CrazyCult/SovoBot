@@ -2,10 +2,10 @@ const { EmbedBuilder } = require('discord.js');
 
 module.exports = {
   name: 'notifications',
-  description: 'Gérer les notifications de composition d\'équipe (admin)',
-  usage: '!notifications [status|test|reset]',
+  description: 'Gérer les notifications de composition d\'équipe et résultats (admin)',
+  usage: '!notifications [status|test|reset|results]',
   
-  async execute(message, args, { apiClient, dataManager, matchNotificationWatcher }) {
+  async execute(message, args, { apiClient, dataManager, matchNotificationWatcher, matchResultWatcher }) {
     // Vérifier les permissions d'administrateur
     if (!message.member || !message.member.permissions.has('ADMINISTRATOR')) {
       const embed = new EmbedBuilder()
@@ -33,15 +33,19 @@ module.exports = {
 
     switch (action) {
       case 'status':
-        await this.showNotificationStatus(message, { dataManager, matchNotificationWatcher });
+        await this.showNotificationStatus(message, { dataManager, matchNotificationWatcher, matchResultWatcher });
         break;
         
       case 'test':
-        await this.testNotifications(message, { dataManager, matchNotificationWatcher });
+        await this.testNotifications(message, { dataManager, matchNotificationWatcher, matchResultWatcher });
         break;
         
       case 'reset':
-        await this.resetNotifications(message, { matchNotificationWatcher });
+        await this.resetNotifications(message, { matchNotificationWatcher, matchResultWatcher });
+        break;
+        
+      case 'results':
+        await this.showResultsStatus(message, { matchResultWatcher });
         break;
         
       default:
@@ -49,65 +53,110 @@ module.exports = {
     }
   },
 
-  async showNotificationStatus(message, { dataManager, matchNotificationWatcher }) {
-    const stats = matchNotificationWatcher.getNotificationStats();
+  async showNotificationStatus(message, { dataManager, matchNotificationWatcher, matchResultWatcher }) {
+    const notificationStats = matchNotificationWatcher.getNotificationStats();
+    const resultStats = matchResultWatcher ? matchResultWatcher.getResultStats() : null;
     const registeredClubs = dataManager.getAllRegisteredClubs();
     const channelCount = Object.keys(dataManager.data.registrations).length;
 
     const embed = new EmbedBuilder()
       .setColor('#4CAF50')
       .setTitle('📊 Statut des Notifications de Match')
-      .setDescription('Surveillance automatique des deadlines de composition d\'équipe')
+      .setDescription('Services de surveillance automatique des matchs')
       .addFields(
         {
-          name: '🎯 Configuration',
+          name: '🔔 Notifications de Composition',
           value: 
-            `**Notifications:** 6h, 3h, 1h avant deadline\n` +
-            `**Vérification:** Toutes les ${stats.checkInterval} minutes\n` +
-            `**Deadline:** 2h avant le début du match`,
-          inline: false
+            `**Timing:** 6h, 3h, 1h avant deadline\n` +
+            `**Vérification:** Toutes les ${notificationStats.checkInterval} minutes\n` +
+            `**Deadline:** 2h avant le début du match\n` +
+            `**Statut:** 🟢 Actif`,
+          inline: true
         },
         {
-          name: '📈 Statistiques',
+          name: '🏆 Notifications de Résultats',
+          value: resultStats ? 
+            `**Méthode:** ${resultStats.method}\n` +
+            `**Délai:** ${resultStats.resultDelay} minute après le match\n` +
+            `**Reprogrammation:** Toutes les ${resultStats.schedulingInterval}\n` +
+            `**Matchs traités:** ${resultStats.processedMatchesCount}\n` +
+            `**Statut:** 🟢 Actif` :
+            `**Statut:** ❌ Non initialisé`,
+          inline: true
+        },
+        {
+          name: '📈 Statistiques Générales',
           value: 
             `**Clubs surveillés:** ${registeredClubs.length}\n` +
             `**Canaux actifs:** ${channelCount}\n` +
-            `**Notifications envoyées:** ${stats.sentNotificationsCount}`,
-          inline: true
-        },
-        {
-          name: '⚙️ État du service',
-          value: '🟢 **Actif**\nSurveillance en cours...',
-          inline: true
+            `**Notifications composition:** ${notificationStats.sentNotificationsCount}`,
+          inline: false
         }
       )
-      .setFooter({ text: 'Les notifications sont envoyées automatiquement dans tous les canaux où le club est inscrit' })
+      .setFooter({ text: 'Tous les services fonctionnent en arrière-plan automatiquement' })
       .setTimestamp();
 
     await message.reply({ embeds: [embed] });
   },
 
-  async testNotifications(message, { dataManager, matchNotificationWatcher }) {
+  async testNotifications(message, { dataManager, matchNotificationWatcher, matchResultWatcher }) {
     const embed = new EmbedBuilder()
       .setColor('#FFA500')
       .setTitle('🔄 Test des notifications en cours...')
-      .setDescription('Vérification forcée de tous les matchs à venir...')
+      .setDescription('Vérification forcée de tous les services...')
+      .addFields({
+        name: '⏳ Opérations en cours',
+        value: '• Test notifications de composition\n• Test notifications de résultats\n• Vérification état des services'
+      })
       .setFooter({ text: 'Cette opération peut prendre quelques secondes' });
 
     const statusMessage = await message.reply({ embeds: [embed] });
 
     try {
-      await matchNotificationWatcher.forceCheck();
+      let compositionResult = 'N/A';
+      let resultResult = 'N/A';
+      
+      // Test notifications de composition
+      try {
+        await matchNotificationWatcher.forceCheck();
+        compositionResult = '✅ Succès';
+      } catch (error) {
+        compositionResult = `❌ Erreur: ${error.message}`;
+      }
+      
+      // Test notifications de résultats
+      if (matchResultWatcher) {
+        try {
+          await matchResultWatcher.forceCheckResults();
+          resultResult = '✅ Succès';
+        } catch (error) {
+          resultResult = `❌ Erreur: ${error.message}`;
+        }
+      } else {
+        resultResult = '⚠️ Service non initialisé';
+      }
       
       const successEmbed = new EmbedBuilder()
         .setColor('#4CAF50')
         .setTitle('✅ Test terminé')
         .setDescription('Vérification forcée effectuée avec succès.')
-        .addFields({
-          name: '📝 Résultat',
-          value: 'Toutes les notifications éligibles ont été traitées.\nConsultez les logs pour plus de détails.',
-          inline: false
-        })
+        .addFields(
+          {
+            name: '🔔 Notifications Composition',
+            value: compositionResult,
+            inline: true
+          },
+          {
+            name: '🏆 Notifications Résultats',
+            value: resultResult,
+            inline: true
+          },
+          {
+            name: '📝 Note',
+            value: 'Les notifications éligibles ont été traitées.\nConsultez les logs pour plus de détails.',
+            inline: false
+          }
+        )
         .setTimestamp();
 
       await statusMessage.edit({ embeds: [successEmbed] });
@@ -126,14 +175,14 @@ module.exports = {
     }
   },
 
-  async resetNotifications(message, { matchNotificationWatcher }) {
+  async resetNotifications(message, { matchNotificationWatcher, matchResultWatcher }) {
     const embed = new EmbedBuilder()
       .setColor('#FFA500')
       .setTitle('⚠️ Confirmation requise')
-      .setDescription('Voulez-vous vraiment réinitialiser le cache des notifications ?')
+      .setDescription('Voulez-vous vraiment réinitialiser tous les caches de notifications ?')
       .addFields({
         name: '📝 Conséquences',
-        value: 'Cela permettra de renvoyer des notifications déjà envoyées.\nUtile en cas de test ou de problème.',
+        value: 'Cela va réinitialiser :\n• Cache notifications de composition\n• Cache notifications de résultats\n\nPermet de renvoyer des notifications déjà envoyées.',
         inline: false
       })
       .setFooter({ text: 'Réagissez avec ✅ pour confirmer ou ❌ pour annuler' });
@@ -157,12 +206,21 @@ module.exports = {
       const reaction = collected.first();
 
       if (reaction.emoji.name === '✅') {
+        // Réinitialiser les caches
         matchNotificationWatcher.resetNotificationCache();
+        if (matchResultWatcher) {
+          matchResultWatcher.resetResultCache();
+        }
         
         const successEmbed = new EmbedBuilder()
           .setColor('#4CAF50')
-          .setTitle('✅ Cache réinitialisé')
-          .setDescription('Le cache des notifications a été vidé avec succès.')
+          .setTitle('✅ Caches réinitialisés')
+          .setDescription('Tous les caches de notifications ont été vidés avec succès.')
+          .addFields({
+            name: '🔄 Services réinitialisés',
+            value: '• ✅ Notifications de composition\n• ✅ Notifications de résultats',
+            inline: false
+          })
           .setTimestamp();
 
         await confirmMessage.edit({ embeds: [successEmbed] });
@@ -184,27 +242,95 @@ module.exports = {
     }
   },
 
+  async showResultsStatus(message, { matchResultWatcher }) {
+    if (!matchResultWatcher) {
+      const embed = new EmbedBuilder()
+        .setColor('#FF6B6B')
+        .setTitle('❌ Service indisponible')
+        .setDescription('Le service de notifications de résultats n\'est pas initialisé.')
+        .setFooter({ text: 'Soccerverse Bot v3.0' });
+      
+      await message.reply({ embeds: [embed] });
+      return;
+    }
+
+    const stats = matchResultWatcher.getResultStats();
+    
+    const embed = new EmbedBuilder()
+      .setColor('#9C27B0')
+      .setTitle('🏆 Statut des Notifications de Résultats')
+      .setDescription('Service de surveillance automatique des résultats de match')
+      .addFields(
+        {
+          name: '⚙️ Configuration',
+          value: 
+            `**Délai après match:** ${stats.resultDelay} minute\n` +
+            `**Méthode:** ${stats.method}\n` +
+            `**Reprogrammation:** Toutes les ${stats.schedulingInterval}`,
+          inline: false
+        },
+        {
+          name: '📊 Statistiques',
+          value: 
+            `**Matchs traités:** ${stats.processedMatchesCount}\n` +
+            `**Période de rétention:** 24 heures\n` +
+            `**État:** 🟢 Surveillance active`,
+          inline: true
+        },
+        {
+          name: '🔄 Fonctionnement',
+          value: 
+            `• Récupération des horaires de prochains matchs\n` +
+            `• Programmation précise 1 minute après chaque match\n` +
+            `• Vérification automatique si match terminé\n` +
+            `• Re-tentative toutes les 5 minutes si pas terminé\n` +
+            `• Notification dans tous les canaux inscrits`,
+          inline: false
+        }
+      )
+      .setFooter({ text: 'Les résultats sont notifiés automatiquement dès qu\'ils sont disponibles' })
+      .setTimestamp();
+
+    await message.reply({ embeds: [embed] });
+  },
+
   async showHelp(message) {
     const embed = new EmbedBuilder()
       .setColor('#2196F3')
       .setTitle('📋 Commande Notifications')
-      .setDescription('Gestion des notifications de composition d\'équipe')
+      .setDescription('Gestion complète des notifications de match')
       .addFields(
         {
           name: '📊 Commandes disponibles',
           value: 
-            '**`!notifications status`** - Afficher le statut du service\n' +
+            '**`!notifications status`** - Statut général des services\n' +
             '**`!notifications test`** - Forcer une vérification immédiate\n' +
-            '**`!notifications reset`** - Réinitialiser le cache des notifications',
+            '**`!notifications reset`** - Réinitialiser tous les caches\n' +
+            '**`!notifications results`** - Statut spécifique aux résultats',
           inline: false
         },
         {
-          name: '⚽ Fonctionnement',
+          name: '🔔 Notifications de Composition',
           value: 
-            '• **Automatic:** Les notifications sont envoyées automatiquement\n' +
-            '• **Timing:** 6h, 3h et 1h avant la deadline de composition\n' +
+            '• **Timing:** 6h, 3h et 1h avant la deadline\n' +
             '• **Deadline:** 2h avant le début du match\n' +
-            '• **Scope:** Tous les clubs inscrits dans tous les canaux',
+            '• **Vérification:** Toutes les 30 minutes',
+          inline: true
+        },
+        {
+          name: '🏆 Notifications de Résultats',
+          value: 
+            '• **Timing:** Programmation précise 1 minute après chaque match\n' +
+            '• **Contenu:** Score final et statistiques\n' +
+            '• **Méthode:** Basée sur les horaires connus des matchs',
+          inline: true
+        },
+        {
+          name: '📡 Scope des Notifications',
+          value: 
+            '• **Cible:** Tous les clubs inscrits\n' +
+            '• **Canaux:** Tous les canaux où le club est inscrit\n' +
+            '• **Automatique:** Aucune intervention manuelle requise',
           inline: false
         }
       )
