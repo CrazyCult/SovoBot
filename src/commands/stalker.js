@@ -1,5 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const axios = require('axios');
+// Import corrigé pour ethers v5
 const ethers = require('ethers');
 
 module.exports = {
@@ -152,6 +153,7 @@ module.exports = {
       await statusMessage.edit({ embeds: [successEmbed] });
       
     } catch (error) {
+      console.error('Erreur stalker:', error);
       const errorEmbed = new EmbedBuilder()
         .setColor('#FF6B6B')
         .setTitle('❌ Erreur de résolution')
@@ -405,9 +407,17 @@ module.exports = {
         }
       ];
 
-      // Créer le provider et le contrat
+      console.log('🔗 Création du provider Polygon...');
+      
+      // Créer le provider et le contrat - Import corrigé
       const provider = new ethers.providers.JsonRpcProvider(POLYGON_RPC_URL);
       const xayaContract = new ethers.Contract(XAYA_ACCOUNTS_ADDRESS, XAYA_ABI, provider);
+
+      console.log('✅ Provider créé, test de connexion...');
+      
+      // Tester la connexion
+      const network = await provider.getNetwork();
+      console.log('🌐 Réseau connecté:', network.name, network.chainId);
 
       const namespaces = ["p", "sv"];
       let lastError;
