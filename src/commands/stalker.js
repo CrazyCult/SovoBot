@@ -1,6 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const axios = require('axios');
-const { ethers } = require('ethers');
+const ethers = require('ethers');
 
 module.exports = {
   name: 'stalker',
