@@ -8,6 +8,7 @@ const ApiClient = require('./src/api/ApiClient');
 const OrderbookWatcher = require('./src/services/OrderbookWatcher');
 const MatchNotificationWatcher = require('./src/services/MatchNotificationWatcher');
 const MatchResultWatcher = require('./src/services/MatchResultWatcher');
+const PolygonStalkerService = require('./src/services/PolygonStalkerService'); // NOUVEAU
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -34,6 +35,7 @@ class SoccerverseBot {
     this.orderbookWatcher = null;
     this.matchNotificationWatcher = null;
     this.matchResultWatcher = null;
+    this.polygonStalkerService = null; // NOUVEAU
     
     // Charger les commandes
     this.loadCommands();
@@ -46,11 +48,15 @@ class SoccerverseBot {
 
     for (const file of commandFiles) {
       const filePath = path.join(commandsPath, file);
-      const command = require(filePath);
-      
-      if (command.name) {
-        this.commands.set(command.name, command);
-        logger.info(`✅ Commande chargée: ${command.name}`);
+      try {
+        const command = require(filePath);
+        
+        if (command.name) {
+          this.commands.set(command.name, command);
+          logger.info(`✅ Commande chargée: ${command.name}`);
+        }
+      } catch (error) {
+        logger.error(`❌ Erreur chargement commande ${file}:`, error.message);
       }
     }
   }
@@ -80,6 +86,10 @@ class SoccerverseBot {
       // Initialiser le service de surveillance des résultats de match
       this.matchResultWatcher = new MatchResultWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('🏆 Service de notifications de résultats initialisé');
+      
+      // Initialiser le service de surveillance Polygon Stalker
+      this.polygonStalkerService = new PolygonStalkerService(this.client, this.dataManager);
+      logger.info('👥 Service Polygon Stalker initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -104,7 +114,8 @@ class SoccerverseBot {
           dataManager: this.dataManager,
           orderbookWatcher: this.orderbookWatcher,
           matchNotificationWatcher: this.matchNotificationWatcher,
-          matchResultWatcher: this.matchResultWatcher
+          matchResultWatcher: this.matchResultWatcher,
+          polygonStalkerService: this.polygonStalkerService // NOUVEAU
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -154,6 +165,9 @@ class SoccerverseBot {
           break;
         case 'watchlist':
           await this.handleWatchlistButton(interaction, params);
+          break;
+        case 'stalker': // NOUVEAU
+          await this.handleStalkerButton(interaction, params);
           break;
         default:
           await interaction.reply({
@@ -232,7 +246,6 @@ class SoccerverseBot {
     
     switch (action) {
       case 'watch':
-        // Demander les critères de surveillance
         await interaction.reply({
           content: '🔍 **Configurer la surveillance des ordres**\n\n' +
                    'Utilisez la commande suivante pour définir vos critères :\n' +
@@ -258,14 +271,11 @@ class SoccerverseBot {
         break;
         
       case 'refresh':
-        // Relancer la commande orderbook
         try {
           const orderbookCommand = this.commands.get('orderbook');
           if (orderbookCommand) {
-            // Simuler l'exécution de la commande
             await interaction.deferReply();
             
-            // Créer un objet message simulé
             const simulatedMessage = {
               channel: interaction.channel,
               reply: async (options) => {
@@ -278,7 +288,8 @@ class SoccerverseBot {
               dataManager: this.dataManager,
               orderbookWatcher: this.orderbookWatcher,
               matchNotificationWatcher: this.matchNotificationWatcher,
-              matchResultWatcher: this.matchResultWatcher
+              matchResultWatcher: this.matchResultWatcher,
+              polygonStalkerService: this.polygonStalkerService
             });
           }
         } catch (error) {
@@ -304,7 +315,6 @@ class SoccerverseBot {
     switch (action) {
       case 'stop':
       case 'all':
-        // Arrêter toutes les surveillances
         const settings = this.dataManager.getChannelSettings(channelId);
         const orderbookWatching = settings.orderbookWatching || {};
         
@@ -319,7 +329,6 @@ class SoccerverseBot {
           return;
         }
         
-        // Arrêter toutes les surveillances
         for (const [clubId, config] of activeWatches) {
           if (this.orderbookWatcher) {
             this.orderbookWatcher.disableWatching(channelId, parseInt(clubId));
@@ -334,7 +343,6 @@ class SoccerverseBot {
         break;
         
       case 'refresh':
-        // Actualiser la liste des surveillances
         try {
           const watchlistCommand = this.commands.get('watchlist');
           if (watchlistCommand) {
@@ -352,7 +360,8 @@ class SoccerverseBot {
               dataManager: this.dataManager,
               orderbookWatcher: this.orderbookWatcher,
               matchNotificationWatcher: this.matchNotificationWatcher,
-              matchResultWatcher: this.matchResultWatcher
+              matchResultWatcher: this.matchResultWatcher,
+              polygonStalkerService: this.polygonStalkerService
             });
           }
         } catch (error) {
@@ -367,6 +376,41 @@ class SoccerverseBot {
       default:
         await interaction.reply({ 
           content: '❌ Action watchlist non reconnue.', 
+          flags: 64 // Ephemeral flag 
+        });
+    }
+  }
+
+  // NOUVELLE MÉTHODE pour gérer les boutons stalker
+  async handleStalkerButton(interaction, params) {
+    const [action] = params;
+    const channelId = interaction.channel.id;
+    
+    switch (action) {
+      case 'stop':
+      case 'all':
+        // Arrêter toutes les surveillances stalker
+        if (this.polygonStalkerService) {
+          const stoppedCount = await this.polygonStalkerService.stopAllWatchingInChannel(channelId);
+          await this.dataManager.save();
+          
+          if (stoppedCount > 0) {
+            await interaction.reply({
+              content: `✅ ${stoppedCount} surveillance(s) stalker arrêtée(s) avec succès.`,
+              flags: 64 // Ephemeral flag
+            });
+          } else {
+            await interaction.reply({
+              content: '⚠️ Aucune surveillance stalker à arrêter.',
+              flags: 64 // Ephemeral flag
+            });
+          }
+        }
+        break;
+        
+      default:
+        await interaction.reply({ 
+          content: '❌ Action stalker non reconnue.', 
           flags: 64 // Ephemeral flag 
         });
     }
