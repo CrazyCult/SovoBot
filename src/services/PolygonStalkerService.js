@@ -23,7 +23,7 @@ class PolygonStalkerService {
     // Cache des dernières transactions
     this.lastTransactionHashes = new Map();
     
-    // NOUVEAU: Flag pour éviter les notifications lors de la première vérification
+    // Flag pour éviter les notifications lors de la première vérification
     this.initializedUsers = new Set();
     
     // Compteurs pour monitoring
@@ -68,10 +68,11 @@ class PolygonStalkerService {
       const watchedUsers = this.getWatchedUsers();
       
       if (watchedUsers.length === 0) {
+        logger.debug('👥 Aucun utilisateur Stalker à surveiller');
         return;
       }
       
-      logger.debug(`👥 Vérification Stalker pour ${watchedUsers.length} utilisateur(s) (intervalle: ${this.checkInterval/1000}s)`);
+      logger.info(`👥 Vérification Stalker pour ${watchedUsers.length} utilisateur(s) (intervalle: ${this.checkInterval/1000}s)`);
       this.stats.totalChecks++;
       
       let successCount = 0;
@@ -79,11 +80,12 @@ class PolygonStalkerService {
       
       for (const watch of watchedUsers) {
         try {
+          logger.debug(`🔍 Vérification ${watch.username} (${watch.wallet.substring(0, 20)}...)`);
           await this.checkUserTransactions(watch);
           successCount++;
           
           // Délai entre utilisateurs pour éviter le rate limiting
-          const delay = this.API_KEY ? 300 : 1500; // Plus conservateur
+          const delay = this.API_KEY ? 300 : 1500;
           await new Promise(resolve => setTimeout(resolve, delay));
           
         } catch (error) {
@@ -91,6 +93,8 @@ class PolygonStalkerService {
           logger.warn(`⚠️ Échec surveillance ${watch.username}: ${error.message}`);
         }
       }
+      
+      logger.info(`📊 Stalker - Succès: ${successCount}, Erreurs: ${errorCount}`);
       
       // Ajuster l'intervalle selon le taux de succès
       this.adjustCheckInterval(successCount, errorCount);
@@ -103,7 +107,7 @@ class PolygonStalkerService {
       }
       
     } catch (error) {
-      logger.error('Erreur surveillance Stalker globale:', error);
+      logger.error('❌ Erreur surveillance Stalker globale:', error);
       this.consecutiveErrors++;
     }
   }
@@ -153,36 +157,54 @@ class PolygonStalkerService {
   async checkUserTransactions(watch) {
     const { channelId, username, wallet } = watch;
     
-    // MODIFIÉ: Augmenter l'offset pour avoir plus de transactions
+    // Augmenter l'offset pour avoir plus de transactions
     let apiUrl = `${this.POLYGONSCAN_API_URL}?module=account&action=txlist&address=${wallet}&startblock=0&endblock=99999999&page=1&offset=20&sort=desc`;
     
     if (this.API_KEY) {
       apiUrl += `&apikey=${this.API_KEY}`;
     }
     
+    logger.debug(`🌐 URL API pour ${username}: ${apiUrl.replace(this.API_KEY, 'API_KEY_HIDDEN')}`);
+    
     // Retry avec backoff exponentiel
     for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
       try {
+        logger.debug(`🔄 Tentative ${attempt}/${this.MAX_RETRIES} pour ${username}`);
         const response = await this.makeApiRequest(apiUrl, attempt);
         
+        logger.debug(`📡 Réponse API ${username}: status=${response?.status}, message=${response?.message}`);
+        
         if (response && response.status === '1' && Array.isArray(response.result)) {
+          logger.info(`✅ ${username}: ${response.result.length} transaction(s) récupérée(s)`);
           await this.processTransactions(watch, response.result);
           return; // Succès !
         } else if (response && response.status === '0') {
           // Erreur API spécifique
-          if (response.message.includes('rate limit')) {
+          if (response.message && response.message.includes('rate limit')) {
             this.stats.rateLimitErrors++;
             logger.warn(`⚠️ Rate limit atteint pour ${username} - Attente plus longue`);
             throw new Error(`Rate limit: ${response.message}`);
           } else {
-            logger.warn(`⚠️ Réponse API invalide pour ${username}: ${response.message}`);
+            logger.warn(`⚠️ Réponse API invalide pour ${username}: ${response.message || 'NOTOK'}`);
+            // DIAGNOSTIC DÉTAILLÉ
+            if (response.message === 'NOTOK') {
+              logger.warn(`🔍 DIAGNOSTIC ${username}:`);
+              logger.warn(`  - Wallet: ${wallet}`);
+              logger.warn(`  - URL complète: ${apiUrl.replace(this.API_KEY, 'API_KEY')}`);
+              logger.warn(`  - Possibles causes: wallet vide, nouveau wallet, ou erreur PolygonScan`);
+            }
             return; // Ne pas retry sur les erreurs logiques
           }
+        } else {
+          logger.error(`❌ Réponse API malformée pour ${username}:`, response);
+          throw new Error('Réponse API malformée');
         }
         
       } catch (error) {
         const isServerError = error.response?.status >= 500 && error.response?.status < 600;
         const isNetworkError = !error.response || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT';
+        
+        logger.debug(`🔧 Analyse erreur ${username}: serverError=${isServerError}, networkError=${isNetworkError}, status=${error.response?.status}`);
         
         if (isServerError || isNetworkError) {
           this.stats.serverErrors++;
@@ -209,29 +231,33 @@ class PolygonStalkerService {
     const timeout = 15000 + (attempt * 5000); // Timeout croissant
     
     try {
+      logger.debug(`📡 Requête HTTP (timeout ${timeout}ms)...`);
+      
       const response = await axios.get(url, {
         timeout: timeout,
         headers: {
           'User-Agent': 'SoccerverseBot/3.0',
           'Accept': 'application/json',
           'Cache-Control': 'no-cache'
-        },
-        // Retry sur les erreurs réseau
-        retry: {
-          retries: 0 // On gère nous-mêmes les retries
         }
       });
+      
+      logger.debug(`📡 HTTP ${response.status} - ${response.statusText}`);
       
       if (response.status === 200 && response.data) {
         return response.data;
       }
       
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      
     } catch (error) {
       // Log détaillé pour diagnostic
       if (error.response) {
-        logger.debug(`API Error - Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`);
+        logger.error(`📡 Erreur HTTP ${error.response.status}: ${JSON.stringify(error.response.data)}`);
+      } else if (error.code) {
+        logger.error(`📡 Erreur réseau ${error.code}: ${error.message}`);
       } else {
-        logger.debug(`Network Error: ${error.message}`);
+        logger.error(`📡 Erreur inconnue: ${error.message}`);
       }
       throw error;
     }
@@ -241,17 +267,21 @@ class PolygonStalkerService {
     const { channelId, username, wallet } = watch;
     
     if (!transactions || transactions.length === 0) {
-      logger.debug(`Aucune transaction trouvée pour ${username}`);
+      logger.warn(`⚠️ ${username}: Aucune transaction trouvée dans la réponse`);
       return;
     }
     
-    // CORRECTION MAJEURE: Gestion des utilisateurs nouvellement ajoutés
+    logger.debug(`🔍 ${username}: Traitement de ${transactions.length} transaction(s)`);
+    
+    // Gestion des utilisateurs nouvellement ajoutés
     const userKey = `${channelId}_${username}`;
     const isFirstCheck = !this.initializedUsers.has(userKey);
     
     if (isFirstCheck) {
       // Première vérification : initialiser le hash mais ne pas notifier
       logger.info(`🆕 Initialisation de ${username} - définition du hash de référence`);
+      logger.debug(`🔗 Hash de référence: ${transactions[0].hash}`);
+      
       this.lastTransactionHashes.set(wallet, transactions[0].hash);
       this.updateLastTransactionHash(channelId, username, transactions[0].hash);
       this.initializedUsers.add(userKey);
@@ -261,16 +291,18 @@ class PolygonStalkerService {
       return;
     }
     
-    // CORRECTION: Utiliser la bonne source pour le hash précédent
+    // Utiliser la bonne source pour le hash précédent
     let lastKnownHash = this.lastTransactionHashes.get(wallet);
     if (!lastKnownHash) {
       // Fallback vers les données sauvegardées
       lastKnownHash = watch.lastTransactionHash;
     }
     
+    logger.debug(`🔍 ${username}: Hash de référence = ${lastKnownHash ? lastKnownHash.substring(0, 15) + '...' : 'AUCUN'}`);
+    
     const newTransactions = [];
     
-    // CORRECTION: Vérifier que nous avons un hash de référence
+    // Vérifier que nous avons un hash de référence
     if (!lastKnownHash) {
       logger.warn(`⚠️ Aucun hash de référence pour ${username}, initialisation...`);
       this.lastTransactionHashes.set(wallet, transactions[0].hash);
@@ -287,17 +319,20 @@ class PolygonStalkerService {
       newTransactions.push(tx);
     }
     
-    logger.debug(`📊 ${username}: ${newTransactions.length} nouvelle(s) transaction(s) détectée(s)`);
+    logger.info(`📊 ${username}: ${newTransactions.length} nouvelle(s) transaction(s) détectée(s)`);
     
     if (newTransactions.length > 0) {
       // Mettre à jour le cache
       this.lastTransactionHashes.set(wallet, transactions[0].hash);
       this.updateLastTransactionHash(channelId, username, transactions[0].hash);
       
+      logger.info(`🎯 ${username}: Envoi de ${Math.min(newTransactions.length, 3)} notification(s)`);
+      
       // Limiter à 3 notifications pour éviter le spam
       const transactionsToNotify = newTransactions.reverse().slice(0, 3);
       
       for (const tx of transactionsToNotify) {
+        logger.debug(`📤 Envoi notification ${username}: ${tx.hash.substring(0, 10)}...`);
         await this.sendTransactionNotification(channelId, tx, watch);
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
@@ -306,15 +341,22 @@ class PolygonStalkerService {
         await this.sendBatchNotification(channelId, watch, newTransactions.length - 3);
       }
       
-      logger.info(`📊 ${newTransactions.length} nouvelle(s) transaction(s) notifiée(s) pour ${username}`);
+      logger.info(`✅ ${newTransactions.length} nouvelle(s) transaction(s) notifiée(s) pour ${username}`);
+    } else {
+      logger.debug(`ℹ️ ${username}: Aucune nouvelle transaction depuis la dernière vérification`);
     }
   }
 
-  // NOUVELLE MÉTHODE: Notification d'initialisation
+  // Notification d'initialisation
   async sendInitializationNotification(channelId, username, transactionCount) {
     try {
       const channel = this.client.channels.cache.get(channelId);
-      if (!channel) return;
+      if (!channel) {
+        logger.warn(`⚠️ Canal ${channelId} introuvable pour notification d'initialisation`);
+        return;
+      }
+      
+      logger.info(`📤 Envoi notification d'initialisation pour ${username}`);
       
       const embed = new EmbedBuilder()
         .setColor('#4CAF50')
@@ -332,9 +374,10 @@ class PolygonStalkerService {
         .setTimestamp();
       
       await channel.send({ embeds: [embed] });
+      logger.info(`✅ Notification d'initialisation envoyée pour ${username}`);
       
     } catch (error) {
-      logger.error('Erreur notification initialisation:', error);
+      logger.error(`❌ Erreur notification initialisation ${username}:`, error);
     }
   }
 
@@ -431,6 +474,7 @@ class PolygonStalkerService {
       if (settings.stalkerWatching && settings.stalkerWatching[username]) {
         settings.stalkerWatching[username].lastTransactionHash = txHash;
         this.dataManager.setChannelSettings(channelId, settings);
+        logger.debug(`💾 Hash mis à jour pour ${username}: ${txHash.substring(0, 10)}...`);
       }
     } catch (error) {
       logger.error('Erreur mise à jour hash transaction:', error);
@@ -467,7 +511,7 @@ class PolygonStalkerService {
 
   resetStalkerCache() {
     this.lastTransactionHashes.clear();
-    this.initializedUsers.clear(); // NOUVEAU
+    this.initializedUsers.clear();
     this.stats = {
       totalChecks: 0,
       successfulChecks: 0,
@@ -489,7 +533,6 @@ class PolygonStalkerService {
         
         for (const [username, watchConfig] of Object.entries(settings.stalkerWatching)) {
           this.lastTransactionHashes.delete(watchConfig.wallet);
-          // NOUVEAU: Nettoyer aussi les initialisations
           const userKey = `${channelId}_${username}`;
           this.initializedUsers.delete(userKey);
         }
@@ -516,7 +559,6 @@ class PolygonStalkerService {
       if (settings.stalkerWatching && settings.stalkerWatching[username]) {
         this.lastTransactionHashes.delete(settings.stalkerWatching[username].wallet);
         
-        // NOUVEAU: Nettoyer aussi l'initialisation
         const userKey = `${channelId}_${username}`;
         this.initializedUsers.delete(userKey);
         
@@ -608,7 +650,5 @@ class PolygonStalkerService {
     return cleanupCount;
   }
 }
-
-module.exports = PolygonStalkerService;
 
 module.exports = PolygonStalkerService;
