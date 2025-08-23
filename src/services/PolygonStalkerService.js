@@ -610,3 +610,5 @@ class PolygonStalkerService {
 }
 
 module.exports = PolygonStalkerService;
+
+module.exports = PolygonStalkerService;
