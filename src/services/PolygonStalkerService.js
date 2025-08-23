@@ -7,12 +7,21 @@ class PolygonStalkerService {
     this.client = client;
     this.dataManager = dataManager;
     
-    // Configuration PolygonScan API
+    // Configuration API
     this.POLYGONSCAN_API_URL = 'https://api.polygonscan.com/api';
-    this.CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+    this.API_KEY = process.env.POLYGONSCAN_API_KEY || '';
     
-    // Intervalle de vérification (30 secondes)
-    this.checkInterval = 30 * 1000;
+    // Proxies CORS mis à jour et plus fiables
+    this.CORS_PROXIES = [
+      'https://api.allorigins.win/raw?url=',
+      'https://api.codetabs.com/v1/proxy?quest=',
+      'https://corsproxy.io/?',
+      'https://proxy.cors.sh/',
+      'https://api.cors.lol/?url='
+    ];
+    
+    // Intervalle de vérification (45 secondes pour éviter le rate limiting)
+    this.checkInterval = 45 * 1000;
     
     // Cache des dernières transactions pour éviter les doublons
     this.lastTransactionHashes = new Map();
@@ -21,22 +30,27 @@ class PolygonStalkerService {
   }
 
   startWatching() {
-    // Vérification initiale après 1 minute
+    // Vérification initiale après 2 minutes (laisser le bot se stabiliser)
     setTimeout(() => {
       this.checkAllWatchedUsers();
-    }, 60000);
+    }, 120000);
     
-    // Puis vérification toutes les 30 secondes
+    // Puis vérification toutes les 45 secondes
     setInterval(() => {
       this.checkAllWatchedUsers();
     }, this.checkInterval);
     
-    logger.info('👥 Service Polygon Stalker démarré (vérification toutes les 30 secondes)');
+    logger.info(`👥 Service Polygon Stalker démarré (vérification toutes les ${this.checkInterval/1000}s)`);
+    
+    if (this.API_KEY) {
+      logger.info('🔑 API Key PolygonScan configurée - Rate limit: 5/sec, 100k/jour');
+    } else {
+      logger.warn('⚠️ Aucune API Key PolygonScan - Rate limit réduit (1/5sec)');
+    }
   }
 
   async checkAllWatchedUsers() {
     try {
-      // Récupérer tous les canaux avec surveillance active
       const watchedUsers = this.getWatchedUsers();
       
       if (watchedUsers.length === 0) {
@@ -48,10 +62,11 @@ class PolygonStalkerService {
       for (const watch of watchedUsers) {
         try {
           await this.checkUserTransactions(watch);
-          // Attendre 1 seconde entre chaque vérification pour éviter le rate limiting
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // Attendre entre chaque vérification pour respecter le rate limit
+          const delay = this.API_KEY ? 250 : 1200; // 4/sec avec API key, 1/sec sans
+          await new Promise(resolve => setTimeout(resolve, delay));
         } catch (error) {
-          logger.error(`Erreur surveillance ${watch.username}:`, error);
+          logger.error(`Erreur surveillance ${watch.username}:`, error.message);
         }
       }
       
@@ -63,7 +78,6 @@ class PolygonStalkerService {
   getWatchedUsers() {
     const watched = [];
     
-    // Parcourir tous les canaux avec des paramètres de surveillance stalker
     for (const [channelId, registrations] of this.dataManager.data.registrations.entries()) {
       const settings = this.dataManager.getChannelSettings(channelId);
       
@@ -89,49 +103,103 @@ class PolygonStalkerService {
     const { channelId, username, wallet } = watch;
     
     try {
-      // Construire l'URL de l'API PolygonScan
-      const targetUrl = `${this.POLYGONSCAN_API_URL}?module=account&action=txlist&address=${wallet}&startblock=0&endblock=99999999&page=1&offset=5&sort=desc`;
-      const proxyUrl = this.CORS_PROXY + encodeURIComponent(targetUrl);
+      // Construire l'URL avec ou sans API key
+      let apiUrl = `${this.POLYGONSCAN_API_URL}?module=account&action=txlist&address=${wallet}&startblock=0&endblock=99999999&page=1&offset=10&sort=desc`;
       
-      const response = await axios.get(proxyUrl, {
-        timeout: 15000,
-        headers: {
-          'User-Agent': 'SoccerverseBot/3.0',
-          'Accept': 'application/json'
-        }
-      });
+      if (this.API_KEY) {
+        apiUrl += `&apikey=${this.API_KEY}`;
+      }
       
-      const data = response.data;
+      let data = null;
       
-      if (data.status === '1' && data.result && data.result.length > 0) {
-        const lastKnownHash = this.lastTransactionHashes.get(wallet) || watch.lastTransactionHash;
-        const newTransactions = [];
-        
-        // Collecter les nouvelles transactions
-        for (const tx of data.result) {
-          if (tx.hash === lastKnownHash) break;
-          newTransactions.push(tx);
-        }
-        
-        // Si de nouvelles transactions sont trouvées
-        if (newTransactions.length > 0) {
-          // Mettre à jour le cache
-          this.lastTransactionHashes.set(wallet, data.result[0].hash);
+      // 1. Essayer d'abord l'API directe
+      if (this.API_KEY) {
+        try {
+          logger.debug(`🔑 Tentative API directe avec clé pour ${username}`);
+          const response = await axios.get(apiUrl, {
+            timeout: 10000,
+            headers: {
+              'User-Agent': 'SoccerverseBot/3.0',
+              'Accept': 'application/json'
+            }
+          });
           
-          // Mettre à jour la configuration persistante
-          this.updateLastTransactionHash(channelId, username, data.result[0].hash);
-          
-          // Notifier les nouvelles transactions (en ordre chronologique)
-          for (const tx of newTransactions.reverse()) {
-            await this.sendTransactionNotification(channelId, tx, watch);
-            // Attendre un peu entre chaque notification
-            await new Promise(resolve => setTimeout(resolve, 500));
+          if (response.status === 200 && response.data) {
+            data = response.data;
+            logger.debug(`✅ API directe réussie pour ${username}`);
+          }
+        } catch (error) {
+          logger.warn(`⚠️ API directe échouée pour ${username}: ${error.message}`);
+        }
+      }
+      
+      // 2. Si l'API directe échoue, essayer les proxies
+      if (!data) {
+        for (let i = 0; i < this.CORS_PROXIES.length && !data; i++) {
+          const proxy = this.CORS_PROXIES[i];
+          try {
+            logger.debug(`🔄 Proxy ${i + 1}/${this.CORS_PROXIES.length} pour ${username}`);
+            
+            const response = await axios.get(proxy + encodeURIComponent(apiUrl), {
+              timeout: 15000,
+              headers: {
+                'User-Agent': 'SoccerverseBot/3.0',
+                'Accept': 'application/json'
+              }
+            });
+            
+            if (response.status === 200) {
+              try {
+                data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+                logger.debug(`✅ Proxy ${i + 1} réussi pour ${username}`);
+                break;
+              } catch (parseError) {
+                logger.debug(`❌ Proxy ${i + 1} - Parsing échoué pour ${username}`);
+              }
+            }
+          } catch (error) {
+            logger.debug(`❌ Proxy ${i + 1} échoué pour ${username}: ${error.message}`);
+            continue;
           }
         }
       }
       
+      if (!data || data.status !== '1' || !data.result || !Array.isArray(data.result)) {
+        logger.warn(`⚠️ Aucune donnée valide pour ${username}`);
+        return;
+      }
+      
+      // Traitement des transactions
+      const lastKnownHash = this.lastTransactionHashes.get(wallet) || watch.lastTransactionHash;
+      const newTransactions = [];
+      
+      for (const tx of data.result) {
+        if (tx.hash === lastKnownHash) break;
+        newTransactions.push(tx);
+      }
+      
+      if (newTransactions.length > 0) {
+        // Mettre à jour le cache
+        this.lastTransactionHashes.set(wallet, data.result[0].hash);
+        
+        // Mettre à jour la configuration persistante
+        this.updateLastTransactionHash(channelId, username, data.result[0].hash);
+        
+        // Notifier les nouvelles transactions (max 3 pour éviter le spam)
+        const transactionsToNotify = newTransactions.reverse().slice(0, 3);
+        
+        for (const tx of transactionsToNotify) {
+          await this.sendTransactionNotification(channelId, tx, watch);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
+        if (newTransactions.length > 3) {
+          await this.sendBatchNotification(channelId, watch, newTransactions.length - 3);
+        }
+      }
+      
     } catch (error) {
-      logger.error(`Erreur vérification transactions ${username}:`, error);
+      logger.error(`Erreur vérification transactions ${username}:`, error.message);
     }
   }
 
@@ -144,7 +212,6 @@ class PolygonStalkerService {
       }
       
       const embed = await this.createTransactionEmbed(tx, watch);
-      
       await channel.send({ embeds: [embed] });
       
       logger.info(`👥 Notification stalker envoyée: ${watch.username} (${tx.hash.substring(0, 20)}...)`);
@@ -154,21 +221,41 @@ class PolygonStalkerService {
     }
   }
 
+  async sendBatchNotification(channelId, watch, additionalCount) {
+    try {
+      const channel = this.client.channels.cache.get(channelId);
+      if (!channel) return;
+      
+      const embed = new EmbedBuilder()
+        .setColor('#FF9800')
+        .setTitle('📊 Activité importante détectée')
+        .setDescription(`**${watch.username}** a effectué **${additionalCount}** transaction(s) supplémentaire(s)`)
+        .addFields({
+          name: '⚡ Résumé',
+          value: `Utilisateur très actif sur la blockchain.\nConsultez [PolygonScan](https://polygonscan.com/address/${watch.wallet}) pour plus de détails.`
+        })
+        .setFooter({ text: 'Notifications groupées pour éviter le spam' })
+        .setTimestamp();
+      
+      await channel.send({ embeds: [embed] });
+      
+    } catch (error) {
+      logger.error('Erreur envoi notification groupée:', error);
+    }
+  }
+
   async createTransactionEmbed(tx, watch) {
     const { username, wallet, namespace, tokenId } = watch;
     
-    // Déterminer si c'est une transaction entrante ou sortante
     const isIncoming = tx.to.toLowerCase() === wallet.toLowerCase();
     const amount = (parseInt(tx.value) / 1e18).toFixed(6);
     const gasUsed = parseInt(tx.gasUsed).toLocaleString();
     const gasCost = (parseInt(tx.gasUsed) * parseInt(tx.gasPrice) / 1e18).toFixed(6);
     
-    // Couleur selon le type de transaction
-    const embedColor = isIncoming ? '#4CAF50' : '#FF6B6B'; // Vert pour réception, rouge pour envoi
+    const embedColor = isIncoming ? '#4CAF50' : '#FF6B6B';
     const typeIcon = isIncoming ? '📥' : '📤';
     const typeText = isIncoming ? 'Réception' : 'Envoi';
     
-    // Date de la transaction
     const txDate = new Date(parseInt(tx.timeStamp) * 1000);
     
     const embed = new EmbedBuilder()
@@ -192,40 +279,32 @@ class PolygonStalkerService {
           inline: true
         },
         {
-          name: '🔗 Hash de transaction',
-          value: `\`${tx.hash}\`\n[Voir sur PolygonScan](https://polygonscan.com/tx/${tx.hash})`,
-          inline: false
-        },
-        {
-          name: '📍 Détails des adresses',
-          value: 
-            `**De:** \`${tx.from}\`\n` +
-            `**Vers:** \`${tx.to}\`\n` +
-            `**Contrat:** ${tx.to === tx.from ? 'N/A' : (tx.input !== '0x' ? 'Oui' : 'Non')}`,
+          name: '🔗 Liens',
+          value: `[Hash: ${tx.hash.substring(0, 20)}...](https://polygonscan.com/tx/${tx.hash})\n[Wallet sur PolygonScan](https://polygonscan.com/address/${wallet})`,
           inline: false
         }
       );
 
-    // Ajouter des détails spéciaux pour les contrats intelligents
-    if (tx.input !== '0x') {
+    // Ajouter des détails pour les interactions avec contrats
+    if (tx.input !== '0x' && tx.input.length > 10) {
       embed.addFields({
         name: '🤖 Interaction avec contrat',
-        value: `Données: ${tx.input.substring(0, 20)}...\nGas utilisé: ${gasUsed}`,
-        inline: true
+        value: `**Contrat:** \`${tx.to}\`\nDonnées: \`${tx.input.substring(0, 20)}...\`\nGas utilisé: ${gasUsed}`,
+        inline: false
       });
     }
 
-    // Ajouter un indicateur de valeur
-    if (parseFloat(amount) > 0.1) {
+    // Indicateur pour les transactions importantes
+    if (parseFloat(amount) > 1.0) {
       embed.addFields({
         name: '💎 Transaction importante',
-        value: `Cette transaction implique **${amount} MATIC** !`,
+        value: `⚠️ Cette transaction implique **${amount} MATIC** !`,
         inline: false
       });
     }
 
     embed.setFooter({ 
-      text: `Réseau: Polygon • Surveillé par Stalker • ${txDate.toISOString()}` 
+      text: `Réseau: Polygon • Surveillé par Stalker • Block #${tx.blockNumber}` 
     })
     .setTimestamp(txDate);
 
@@ -238,26 +317,24 @@ class PolygonStalkerService {
       
       if (settings.stalkerWatching && settings.stalkerWatching[username]) {
         settings.stalkerWatching[username].lastTransactionHash = txHash;
-        
         this.dataManager.setChannelSettings(channelId, settings);
-        // Note: La sauvegarde sera faite par le processus principal
       }
     } catch (error) {
       logger.error('Erreur mise à jour hash transaction:', error);
     }
   }
 
-  // Méthodes de gestion pour les commandes
-
+  // Méthodes de gestion (inchangées)
   getStalkerStats() {
     const watchedUsers = this.getWatchedUsers();
     
     return {
       watchedUsersCount: watchedUsers.length,
-      checkInterval: this.checkInterval / 1000, // en secondes
+      checkInterval: this.checkInterval / 1000,
       cacheSize: this.lastTransactionHashes.size,
       uniqueChannels: new Set(watchedUsers.map(w => w.channelId)).size,
-      uniqueWallets: new Set(watchedUsers.map(w => w.wallet)).size
+      uniqueWallets: new Set(watchedUsers.map(w => w.wallet)).size,
+      hasApiKey: !!this.API_KEY
     };
   }
 
@@ -271,7 +348,6 @@ class PolygonStalkerService {
     logger.info('🔄 Cache stalker réinitialisé');
   }
 
-  // Arrêter toutes les surveillances d'un canal
   async stopAllWatchingInChannel(channelId) {
     try {
       const settings = this.dataManager.getChannelSettings(channelId);
@@ -279,12 +355,10 @@ class PolygonStalkerService {
       if (settings.stalkerWatching) {
         const userCount = Object.keys(settings.stalkerWatching).length;
         
-        // Supprimer les caches correspondants
         for (const [username, watchConfig] of Object.entries(settings.stalkerWatching)) {
           this.lastTransactionHashes.delete(watchConfig.wallet);
         }
         
-        // Supprimer la configuration
         delete settings.stalkerWatching;
         this.dataManager.setChannelSettings(channelId, settings);
         
@@ -300,19 +374,14 @@ class PolygonStalkerService {
     }
   }
 
-  // Arrêter la surveillance d'un utilisateur spécifique
   stopWatchingUser(channelId, username) {
     try {
       const settings = this.dataManager.getChannelSettings(channelId);
       
       if (settings.stalkerWatching && settings.stalkerWatching[username]) {
-        // Supprimer du cache
         this.lastTransactionHashes.delete(settings.stalkerWatching[username].wallet);
-        
-        // Supprimer de la configuration
         delete settings.stalkerWatching[username];
         
-        // Si plus aucun utilisateur surveillé, supprimer la section
         if (Object.keys(settings.stalkerWatching).length === 0) {
           delete settings.stalkerWatching;
         }
@@ -331,7 +400,6 @@ class PolygonStalkerService {
     }
   }
 
-  // Méthode pour obtenir les détails d'un utilisateur surveillé
   getWatchedUserDetails(channelId, username) {
     try {
       const settings = this.dataManager.getChannelSettings(channelId);
@@ -347,7 +415,6 @@ class PolygonStalkerService {
     }
   }
 
-  // Debug: Afficher toutes les surveillances actives
   debugStalkerWatching() {
     logger.debug('=== STALKER SURVEILLANCE DEBUG ===');
     const watchedUsers = this.getWatchedUsers();
@@ -361,10 +428,10 @@ class PolygonStalkerService {
     }
     
     logger.debug(`Cache size: ${this.lastTransactionHashes.size}`);
+    logger.debug(`API Key configurée: ${!!this.API_KEY}`);
     logger.debug('=== FIN DEBUG STALKER ===');
   }
 
-  // Méthode pour nettoyer les surveillances orphelines (canaux supprimés)
   async cleanupOrphanedWatches() {
     let cleanupCount = 0;
     
@@ -375,7 +442,6 @@ class PolygonStalkerService {
         const channel = this.client.channels.cache.get(watch.channelId);
         
         if (!channel) {
-          // Canal supprimé, nettoyer la surveillance
           this.stopWatchingUser(watch.channelId, watch.username);
           cleanupCount++;
           logger.info(`🧹 Surveillance orpheline nettoyée: ${watch.username} (canal ${watch.channelId} supprimé)`);
@@ -394,5 +460,7 @@ class PolygonStalkerService {
     return cleanupCount;
   }
 }
+
+module.exports = PolygonStalkerService;
 
 module.exports = PolygonStalkerService;
