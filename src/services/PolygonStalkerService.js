@@ -23,6 +23,9 @@ class PolygonStalkerService {
     // Cache des dernières transactions
     this.lastTransactionHashes = new Map();
     
+    // NOUVEAU: Flag pour éviter les notifications lors de la première vérification
+    this.initializedUsers = new Set();
+    
     // Compteurs pour monitoring
     this.stats = {
       totalChecks: 0,
@@ -150,7 +153,8 @@ class PolygonStalkerService {
   async checkUserTransactions(watch) {
     const { channelId, username, wallet } = watch;
     
-    let apiUrl = `${this.POLYGONSCAN_API_URL}?module=account&action=txlist&address=${wallet}&startblock=0&endblock=99999999&page=1&offset=5&sort=desc`;
+    // MODIFIÉ: Augmenter l'offset pour avoir plus de transactions
+    let apiUrl = `${this.POLYGONSCAN_API_URL}?module=account&action=txlist&address=${wallet}&startblock=0&endblock=99999999&page=1&offset=20&sort=desc`;
     
     if (this.API_KEY) {
       apiUrl += `&apikey=${this.API_KEY}`;
@@ -237,35 +241,100 @@ class PolygonStalkerService {
     const { channelId, username, wallet } = watch;
     
     if (!transactions || transactions.length === 0) {
+      logger.debug(`Aucune transaction trouvée pour ${username}`);
       return;
     }
     
-    const lastKnownHash = this.lastTransactionHashes.get(wallet) || watch.lastTransactionHash;
+    // CORRECTION MAJEURE: Gestion des utilisateurs nouvellement ajoutés
+    const userKey = `${channelId}_${username}`;
+    const isFirstCheck = !this.initializedUsers.has(userKey);
+    
+    if (isFirstCheck) {
+      // Première vérification : initialiser le hash mais ne pas notifier
+      logger.info(`🆕 Initialisation de ${username} - définition du hash de référence`);
+      this.lastTransactionHashes.set(wallet, transactions[0].hash);
+      this.updateLastTransactionHash(channelId, username, transactions[0].hash);
+      this.initializedUsers.add(userKey);
+      
+      // Envoyer une notification de confirmation d'ajout
+      await this.sendInitializationNotification(channelId, username, transactions.length);
+      return;
+    }
+    
+    // CORRECTION: Utiliser la bonne source pour le hash précédent
+    let lastKnownHash = this.lastTransactionHashes.get(wallet);
+    if (!lastKnownHash) {
+      // Fallback vers les données sauvegardées
+      lastKnownHash = watch.lastTransactionHash;
+    }
+    
     const newTransactions = [];
     
+    // CORRECTION: Vérifier que nous avons un hash de référence
+    if (!lastKnownHash) {
+      logger.warn(`⚠️ Aucun hash de référence pour ${username}, initialisation...`);
+      this.lastTransactionHashes.set(wallet, transactions[0].hash);
+      this.updateLastTransactionHash(channelId, username, transactions[0].hash);
+      return;
+    }
+    
+    // Identifier les nouvelles transactions
     for (const tx of transactions) {
-      if (tx.hash === lastKnownHash) break;
+      if (tx.hash === lastKnownHash) {
+        logger.debug(`🔍 Hash de référence trouvé pour ${username}: ${lastKnownHash.substring(0, 10)}...`);
+        break;
+      }
       newTransactions.push(tx);
     }
+    
+    logger.debug(`📊 ${username}: ${newTransactions.length} nouvelle(s) transaction(s) détectée(s)`);
     
     if (newTransactions.length > 0) {
       // Mettre à jour le cache
       this.lastTransactionHashes.set(wallet, transactions[0].hash);
       this.updateLastTransactionHash(channelId, username, transactions[0].hash);
       
-      // Limiter à 2 notifications pour éviter le spam
-      const transactionsToNotify = newTransactions.reverse().slice(0, 2);
+      // Limiter à 3 notifications pour éviter le spam
+      const transactionsToNotify = newTransactions.reverse().slice(0, 3);
       
       for (const tx of transactionsToNotify) {
         await this.sendTransactionNotification(channelId, tx, watch);
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
-      if (newTransactions.length > 2) {
-        await this.sendBatchNotification(channelId, watch, newTransactions.length - 2);
+      if (newTransactions.length > 3) {
+        await this.sendBatchNotification(channelId, watch, newTransactions.length - 3);
       }
       
-      logger.info(`📊 ${newTransactions.length} nouvelle(s) transaction(s) détectée(s) pour ${username}`);
+      logger.info(`📊 ${newTransactions.length} nouvelle(s) transaction(s) notifiée(s) pour ${username}`);
+    }
+  }
+
+  // NOUVELLE MÉTHODE: Notification d'initialisation
+  async sendInitializationNotification(channelId, username, transactionCount) {
+    try {
+      const channel = this.client.channels.cache.get(channelId);
+      if (!channel) return;
+      
+      const embed = new EmbedBuilder()
+        .setColor('#4CAF50')
+        .setTitle('✅ Surveillance initialisée')
+        .setDescription(`**${username}** est maintenant surveillé sur Polygon !`)
+        .addFields({
+          name: '📊 État actuel',
+          value: `${transactionCount} transaction(s) trouvée(s)\nLa surveillance est maintenant active.`
+        })
+        .addFields({
+          name: '🔔 Prochaines étapes',
+          value: 'Vous recevrez une notification pour chaque nouvelle transaction.'
+        })
+        .setFooter({ text: 'Première vérification effectuée • Stalker actif' })
+        .setTimestamp();
+      
+      await channel.send({ embeds: [embed] });
+      
+    } catch (error) {
+      logger.error('Erreur notification initialisation:', error);
     }
   }
 
@@ -398,6 +467,7 @@ class PolygonStalkerService {
 
   resetStalkerCache() {
     this.lastTransactionHashes.clear();
+    this.initializedUsers.clear(); // NOUVEAU
     this.stats = {
       totalChecks: 0,
       successfulChecks: 0,
@@ -419,6 +489,9 @@ class PolygonStalkerService {
         
         for (const [username, watchConfig] of Object.entries(settings.stalkerWatching)) {
           this.lastTransactionHashes.delete(watchConfig.wallet);
+          // NOUVEAU: Nettoyer aussi les initialisations
+          const userKey = `${channelId}_${username}`;
+          this.initializedUsers.delete(userKey);
         }
         
         delete settings.stalkerWatching;
@@ -442,6 +515,11 @@ class PolygonStalkerService {
       
       if (settings.stalkerWatching && settings.stalkerWatching[username]) {
         this.lastTransactionHashes.delete(settings.stalkerWatching[username].wallet);
+        
+        // NOUVEAU: Nettoyer aussi l'initialisation
+        const userKey = `${channelId}_${username}`;
+        this.initializedUsers.delete(userKey);
+        
         delete settings.stalkerWatching[username];
         
         if (Object.keys(settings.stalkerWatching).length === 0) {
@@ -484,13 +562,19 @@ class PolygonStalkerService {
       logger.debug('Aucune surveillance active');
     } else {
       for (const watch of watchedUsers) {
+        const userKey = `${watch.channelId}_${watch.username}`;
+        const isInitialized = this.initializedUsers.has(userKey);
+        const hasCache = this.lastTransactionHashes.has(watch.wallet);
+        
         logger.debug(`Canal ${watch.channelId}: ${watch.username} (${watch.wallet.substring(0, 20)}...)`);
+        logger.debug(`  └ Initialisé: ${isInitialized}, Cache: ${hasCache}, Hash sauvé: ${watch.lastTransactionHash ? 'Oui' : 'Non'}`);
       }
     }
     
     logger.debug(`Intervalle actuel: ${this.checkInterval/1000}s`);
     logger.debug(`Erreurs consécutives: ${this.consecutiveErrors}`);
     logger.debug(`Cache size: ${this.lastTransactionHashes.size}`);
+    logger.debug(`Utilisateurs initialisés: ${this.initializedUsers.size}`);
     logger.debug(`API Key configurée: ${!!this.API_KEY}`);
     logger.debug(`Statistiques: ${JSON.stringify(this.stats, null, 2)}`);
     logger.debug('=== FIN DEBUG STALKER ===');
