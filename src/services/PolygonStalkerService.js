@@ -269,44 +269,57 @@ class PolygonStalkerService {
   async createTransactionEmbed(tx, watch) {
     const { username } = watch;
     
-    // Parser la transaction si c'est une chaîne JSON
-    let transaction = tx;
-    if (typeof tx === 'string') {
-      try {
-        transaction = JSON.parse(tx);
-      } catch (e) {
-        logger.warn('Impossible de parser la transaction JSON:', tx);
-        transaction = tx;
-      }
-    }
-    
-    const txDate = transaction.date ? new Date(transaction.date * 1000) : new Date();
-    const type = transaction.type || 'Transaction inconnue';
-    const num = transaction.num || 'N/A';
-    const otherName = transaction.other_name || 'N/A';
+    const txDate = tx.date ? new Date(tx.date * 1000) : new Date();
+    const type = tx.type || 'Transaction inconnue';
+    const num = tx.num || 'N/A';
+    const otherName = tx.othername || 'N/A'; // CORRECTION: "othername" pas "other_name"
     
     // Déterminer le type de transaction et la couleur
     let embedColor = '#2196F3';
     let typeIcon = '💼';
     let typeText = 'Transaction';
     let detailsText = '';
+    let linksText = `[Profil utilisateur](https://play.soccerverse.com/user/${username})`;
+    
+    // CORRECTION: Nouvelle structure share
+    const shareObj = tx.share || {};
+    let shareType = 'N/A';
+    let shareId = 'N/A';
+    let shareName = 'N/A';
+    
+    if (shareObj.club) {
+      shareType = 'club';
+      shareId = shareObj.club;
+      try {
+        shareName = this.apiClient.getClubName(parseInt(shareId));
+      } catch (e) {
+        shareName = `Club #${shareId}`;
+      }
+    } else if (shareObj.player) {
+      shareType = 'player';
+      shareId = shareObj.player;
+      try {
+        shareName = this.apiClient.getPlayerName(parseInt(shareId));
+      } catch (e) {
+        shareName = `Joueur #${shareId}`;
+      }
+    }
     
     if (type.includes('share trade')) {
       embedColor = '#9C27B0';
       typeIcon = '💹';
       typeText = 'Transaction de Parts';
       
-      const shareType = transaction.share?.type || 'inconnu';
-      const shareId = transaction.share?.id || 'N/A';
-      detailsText = `**Type de part:** ${shareType}\n**ID:** ${shareId}`;
+      detailsText = `**Type:** ${shareType}\n**ID:** ${shareId}\n**Nom:** ${shareName}`;
       
-      if (otherName !== 'N/A') {
-        detailsText += `\n**Partenaire:** ${otherName}`;
+      if (shareType === 'club') {
+        linksText += `\n[${shareName}](https://play.soccerverse.com/club/${shareId})`;
+      } else if (shareType === 'player') {
+        linksText += `\n[${shareName}](https://play.soccerverse.com/player/${shareId})`;
       }
       
-      // Ajouter le lien vers le club/joueur si disponible
-      if (shareType === 'club' && shareId !== 'N/A') {
-        detailsText += `\n**Lien:** [Club #${shareId}](https://play.soccerverse.com/club/${shareId})`;
+      if (otherName !== 'N/A') {
+        detailsText += `\n**Partenaire:** [${otherName}](https://play.soccerverse.com/user/${otherName})`;
       }
       
     } else if (type.includes('mint')) {
@@ -315,6 +328,15 @@ class PolygonStalkerService {
       typeText = 'Mint NFT';
       detailsText = `**Montant:** ${num}\n**Type:** Création de carte NFT`;
       
+      // Pour les mints, on a maintenant les vraies infos !
+      if (shareType === 'club') {
+        detailsText += `\n**Club:** ${shareName}`;
+        linksText += `\n[${shareName}](https://play.soccerverse.com/club/${shareId})`;
+      } else if (shareType === 'player') {
+        detailsText += `\n**Joueur:** ${shareName}`;
+        linksText += `\n[${shareName}](https://play.soccerverse.com/player/${shareId})`;
+      }
+      
     } else if (type.includes('user tx')) {
       embedColor = '#FF6B6B';
       typeIcon = '💸';
@@ -322,7 +344,7 @@ class PolygonStalkerService {
       detailsText = `**Numéro:** ${num}`;
       
       if (otherName !== 'N/A') {
-        detailsText += `\n**Destinataire:** ${otherName}`;
+        detailsText += `\n**Destinataire:** [${otherName}](https://play.soccerverse.com/user/${otherName})`;
       }
     }
     
@@ -358,7 +380,7 @@ class PolygonStalkerService {
 
     embed.addFields({
       name: '🔗 Liens',
-      value: `[Profil utilisateur](https://play.soccerverse.com/user/${username})`,
+      value: linksText,
       inline: false
     });
 
