@@ -8,7 +8,7 @@ const ApiClient = require('./src/api/ApiClient');
 const OrderbookWatcher = require('./src/services/OrderbookWatcher');
 const MatchNotificationWatcher = require('./src/services/MatchNotificationWatcher');
 const MatchResultWatcher = require('./src/services/MatchResultWatcher');
-const PolygonStalkerService = require('./src/services/PolygonStalkerService'); // NOUVEAU
+const PolygonStalkerService = require('./src/services/PolygonStalkerService');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -35,7 +35,7 @@ class SoccerverseBot {
     this.orderbookWatcher = null;
     this.matchNotificationWatcher = null;
     this.matchResultWatcher = null;
-    this.polygonStalkerService = null; // NOUVEAU
+    this.polygonStalkerService = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -87,9 +87,9 @@ class SoccerverseBot {
       this.matchResultWatcher = new MatchResultWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('🏆 Service de notifications de résultats initialisé');
       
-      // Initialiser le service de surveillance Polygon Stalker
-      this.polygonStalkerService = new PolygonStalkerService(this.client, this.dataManager);
-      logger.info('👥 Service Polygon Stalker initialisé');
+      // Initialiser le service de surveillance Stalker avec l'apiClient
+      this.polygonStalkerService = new PolygonStalkerService(this.client, this.dataManager, this.apiClient);
+      logger.info('👥 Service Stalker Soccerverse initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -115,7 +115,7 @@ class SoccerverseBot {
           orderbookWatcher: this.orderbookWatcher,
           matchNotificationWatcher: this.matchNotificationWatcher,
           matchResultWatcher: this.matchResultWatcher,
-          polygonStalkerService: this.polygonStalkerService // NOUVEAU
+          polygonStalkerService: this.polygonStalkerService
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -166,7 +166,7 @@ class SoccerverseBot {
         case 'watchlist':
           await this.handleWatchlistButton(interaction, params);
           break;
-        case 'stalker': // NOUVEAU
+        case 'stalker':
           await this.handleStalkerButton(interaction, params);
           break;
         default:
@@ -381,7 +381,6 @@ class SoccerverseBot {
     }
   }
 
-  // NOUVELLE MÉTHODE pour gérer les boutons stalker
   async handleStalkerButton(interaction, params) {
     const [action] = params;
     const channelId = interaction.channel.id;
