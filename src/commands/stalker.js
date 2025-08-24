@@ -18,40 +18,50 @@ module.exports = {
       return;
     }
 
-    const action = args[1]?.toLowerCase() || 'add';
     const channelId = message.channel.id;
+
+    // CORRECTION: Gérer les commandes spéciales en premier
+    if (args.length === 1) {
+      const command = args[0].toLowerCase();
+      
+      switch (command) {
+        case 'list':
+          await this.showWatchedUsers(message, channelId, { dataManager });
+          return;
+          
+        case 'status':
+          await this.showStalkerStatus(message, channelId, { dataManager, polygonStalkerService });
+          return;
+          
+        default:
+          // Si ce n'est pas une commande spéciale, traiter comme un nom d'utilisateur
+          await this.addUserToWatch(message, args[0], channelId, { dataManager, apiClient, polygonStalkerService });
+          return;
+      }
+    }
+
+    // Si aucun argument, afficher l'aide
+    if (args.length === 0) {
+      await this.showHelp(message);
+      return;
+    }
+
+    // CORRECTION: Nouveau parsing pour les commandes avec 2 arguments
+    const username = args[0];
+    const action = args[1]?.toLowerCase();
 
     switch (action) {
       case 'add':
-        if (!args[0]) {
-          await this.showHelp(message);
-          return;
-        }
-        await this.addUserToWatch(message, args[0], channelId, { dataManager, apiClient, polygonStalkerService });
+        await this.addUserToWatch(message, username, channelId, { dataManager, apiClient, polygonStalkerService });
         break;
         
       case 'remove':
-        if (!args[0]) {
-          await this.showWatchedUsers(message, channelId, { dataManager });
-          return;
-        }
-        await this.removeUserFromWatch(message, args[0], channelId, { dataManager, polygonStalkerService });
-        break;
-        
-      case 'list':
-        await this.showWatchedUsers(message, channelId, { dataManager });
-        break;
-        
-      case 'status':
-        await this.showStalkerStatus(message, channelId, { dataManager, polygonStalkerService });
+        await this.removeUserFromWatch(message, username, channelId, { dataManager, polygonStalkerService });
         break;
         
       default:
-        if (args[0]) {
-          await this.addUserToWatch(message, args[0], channelId, { dataManager, apiClient, polygonStalkerService });
-        } else {
-          await this.showHelp(message);
-        }
+        // Par défaut, ajouter l'utilisateur
+        await this.addUserToWatch(message, username, channelId, { dataManager, apiClient, polygonStalkerService });
     }
   },
 
@@ -403,26 +413,5 @@ module.exports = {
       .setFooter({ text: 'Version améliorée avec API Soccerverse • Soccerverse Bot v3.0' });
 
     await message.reply({ embeds: [embed] });
-  },
-
-  async validateAndInitializeUser(username, apiClient) {
-    try {
-      // Utiliser l'API RPC pour vérifier que l'utilisateur existe
-      const result = await apiClient.makeRpcRequest('get_user_share_transactions', {
-        name: username
-      });
-      
-      // Vérifier que l'utilisateur existe (même sans transactions)
-      if (!result && result !== []) {
-        throw new Error(`Utilisateur "${username}" introuvable`);
-      }
-      
-      console.log(`✅ Utilisateur ${username} validé - ${Array.isArray(result) ? result.length : 0} transaction(s) trouvée(s)`);
-      return true;
-      
-    } catch (error) {
-      console.error(`❌ Validation utilisateur ${username} échouée:`, error);
-      throw new Error(`Utilisateur "${username}" introuvable sur Soccerverse`);
-    }
   }
 };
