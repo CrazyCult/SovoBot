@@ -21,7 +21,7 @@ class EncheresWatcher {
       totalChecks: 0,
       notificationsSent: 0,
       outbidsDetected: 0,
-      endingAlertseSent: 0
+      endingAlertsSent: 0
     };
     
     this.startWatching();
@@ -247,7 +247,7 @@ class EncheresWatcher {
         if (remainingMinutes <= notifyMinutes && remainingMinutes > 0 && !this.notifiedEndingSoon.has(notificationKey)) {
           await this.sendEndingSoonNotification(channelId, auction, notifyMinutes);
           this.notifiedEndingSoon.add(notificationKey);
-          this.stats.endingAlertseSent++;
+          this.stats.endingAlertsSent++;
         }
       }
     }
@@ -297,4 +297,195 @@ class EncheresWatcher {
             inline: true
           },
           {
-            name: '🔥
+            name: '🔥 Enchérisseur',
+            value: bidderName,
+            inline: true
+          }
+        )
+        .setFooter({ 
+          text: 'Enchérissez rapidement pour reprendre la tête ! • Soccerverse Bot v3.0' 
+        })
+        .setTimestamp();
+
+      await channel.send({ embeds: [embed] });
+      this.stats.notificationsSent++;
+      
+      logger.info(`🚨 Notification dépassement envoyée: ${playerName} pour ${clubName}`);
+      
+    } catch (error) {
+      logger.error('Erreur envoi notification dépassement:', error);
+    }
+  }
+
+  async sendEndingSoonNotification(channelId, auction, minutesLeft) {
+    try {
+      const channel = this.client.channels.cache.get(channelId);
+      if (!channel) {
+        logger.warn(`Canal ${channelId} introuvable pour notification fin imminente`);
+        return;
+      }
+      
+      const playerName = this.apiClient.getPlayerName(auction.player_id);
+      const bidderName = this.apiClient.getClubName(auction.highest_bidder);
+      
+      let urgencyColor = '#FFA500';
+      let urgencyEmoji = '⏰';
+      
+      if (minutesLeft <= 5) {
+        urgencyColor = '#FF6B6B';
+        urgencyEmoji = '🚨';
+      } else if (minutesLeft <= 15) {
+        urgencyColor = '#FF9800';
+        urgencyEmoji = '⚠️';
+      }
+      
+      const embed = new EmbedBuilder()
+        .setColor(urgencyColor)
+        .setTitle(`${urgencyEmoji} Enchère se termine dans ${minutesLeft} minute${minutesLeft > 1 ? 's' : ''} !`)
+        .setThumbnail(`https://elrincondeldt.com/sv/photos/players/${auction.player_id}.png`)
+        .setDescription(`**${playerName}** - Dernière chance d'enchérir !`)
+        .addFields(
+          {
+            name: '👤 Joueur',
+            value: `[${playerName}](https://play.soccerverse.com/player/${auction.player_id})`,
+            inline: true
+          },
+          {
+            name: '💰 Enchère Actuelle',
+            value: this.formatCurrency(auction.highest_bid),
+            inline: true
+          },
+          {
+            name: '🏟️ En Tête',
+            value: bidderName,
+            inline: true
+          },
+          {
+            name: '⏱️ Temps Restant',
+            value: `${minutesLeft} minute${minutesLeft > 1 ? 's' : ''}`,
+            inline: true
+          },
+          {
+            name: '🏆 ID Enchère',
+            value: `#${auction.transfer_auction_id}`,
+            inline: true
+          },
+          {
+            name: '🔗 Action',
+            value: `[Enchérir maintenant](https://play.soccerverse.com/transfers)`,
+            inline: true
+          }
+        )
+        .setFooter({ 
+          text: `Ne ratez pas cette opportunité ! • Soccerverse Bot v3.0` 
+        })
+        .setTimestamp();
+
+      await channel.send({ embeds: [embed] });
+      this.stats.notificationsSent++;
+      
+      logger.info(`⏰ Notification fin imminente envoyée: ${playerName} (${minutesLeft}min)`);
+      
+    } catch (error) {
+      logger.error('Erreur envoi notification fin imminente:', error);
+    }
+  }
+
+  formatCurrency(amount) {
+    if (!amount || amount === 0) return '0$';
+    
+    // L'API renvoie les montants en centimes
+    const dollars = Math.ceil(amount / 10000);
+    
+    if (dollars >= 1000000000) {
+      return `${(dollars / 1000000000).toFixed(1)}B$`;
+    } else if (dollars >= 1000000) {
+      return `${(dollars / 1000000).toFixed(1)}M$`;
+    } else if (dollars >= 1000) {
+      return `${(dollars / 1000).toFixed(1)}K$`;
+    } else {
+      return `${dollars.toLocaleString()}$`;
+    }
+  }
+
+  updateLastCheck(channelId) {
+    try {
+      const settings = this.dataManager.getChannelSettings(channelId);
+      
+      if (settings.encheresWatching) {
+        settings.encheresWatching.lastCheck = Date.now();
+        this.dataManager.setChannelSettings(channelId, settings);
+      }
+    } catch (error) {
+      logger.error('Erreur mise à jour dernière vérification:', error);
+    }
+  }
+
+  cleanupOldNotifications() {
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    
+    for (const notificationKey of this.notifiedEndingSoon) {
+      // Nettoyer les notifications anciennes (basique pour l'instant)
+      // Une implémentation plus sophistiquée pourrait stocker les timestamps
+    }
+    
+    logger.debug(`🧹 Nettoyage notifications enchères`);
+  }
+
+  // =================== MÉTHODES DE GESTION ===================
+
+  enableWatching(channelId) {
+    const settings = this.dataManager.getChannelSettings(channelId);
+    
+    if (settings.encheresWatching) {
+      settings.encheresWatching.enabled = true;
+      this.dataManager.setChannelSettings(channelId, settings);
+      
+      logger.info(`🏆 Surveillance enchères activée: Canal ${channelId}`);
+    }
+  }
+
+  disableWatching(channelId) {
+    const settings = this.dataManager.getChannelSettings(channelId);
+    
+    if (settings.encheresWatching) {
+      settings.encheresWatching.enabled = false;
+      this.dataManager.setChannelSettings(channelId, settings);
+      
+      logger.info(`🏆 Surveillance enchères désactivée: Canal ${channelId}`);
+    }
+  }
+
+  getEncheresStats() {
+    const watchedChannels = this.getWatchedChannels();
+    
+    return {
+      active: true,
+      watchedChannels: watchedChannels.length,
+      totalChecks: this.stats.totalChecks,
+      notificationsSent: this.stats.notificationsSent,
+      outbidsDetected: this.stats.outbidsDetected,
+      endingAlertsSent: this.stats.endingAlertsSent,
+      checkInterval: this.checkInterval / 1000
+    };
+  }
+
+  async forceCheck() {
+    logger.info('🔄 Vérification forcée enchères...');
+    await this.checkAllWatchedAuctions();
+  }
+
+  resetEncheresCache() {
+    this.previousBids.clear();
+    this.notifiedEndingSoon.clear();
+    this.stats = {
+      totalChecks: 0,
+      notificationsSent: 0,
+      outbidsDetected: 0,
+      endingAlertsSent: 0
+    };
+    logger.info('🔄 Cache enchères réinitialisé');
+  }
+}
+
+module.exports = EncheresWatcher;
