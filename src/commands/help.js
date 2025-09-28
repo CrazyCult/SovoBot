@@ -20,7 +20,26 @@ module.exports = {
             '**`!matchs [club_id]`** - Voir les matchs d\'un club (dernier et prochain)\n' +
             '**`!calendrier [club_id]`** - Voir le calendrier des prochains matchs\n' +
             '**`!classement [club_id]`** - Voir le classement de la ligue\n' +
+            '**`!encheres [player_id|start|stop|status]`** - Surveiller les enchères\n' +
             '**`!help`** - Afficher cette aide',
+          inline: false
+        },
+        {
+          name: '🏆 Surveillance des Enchères',
+          value: 
+            '**`!encheres`** - Démarrer surveillance pour clubs inscrits\n' +
+            '**`!encheres <player_id>`** - Ajouter un joueur à surveiller\n' +
+            '**`!encheres stop`** - Arrêter la surveillance\n' +
+            '**`!encheres status`** - Voir le statut de la surveillance\n' +
+            '**`!encheres list`** - Voir les clubs/joueurs surveillés',
+          inline: false
+        },
+        {
+          name: '📊 Surveillance Avancée',
+          value: 
+            '**`!orderbook [club_id] [min] [max]`** - Surveiller les ordres de parts\n' +
+            '**`!watchlist [stop] [club_id]`** - Gérer les surveillances orderbook\n' +
+            '**`!stalker <username> [add|remove]`** - Surveiller un utilisateur (admin)',
           inline: false
         },
         {
@@ -28,11 +47,12 @@ module.exports = {
           value: 
             '**`!notifications [status|test|reset]`** - Gérer les notifications (admin)\n' +
             '**`!update`** - Mettre à jour les mappings (admin)\n' +
-            '**`!reload <commande>`** - Recharger une commande (admin)',
+            '**`!reload <commande>`** - Recharger une commande (admin)\n' +
+            '**`!stalkeradmin [status|test|reset]`** - Admin service stalker (admin)',
           inline: false
         },
         {
-          name: '💡 Exemples d\'utilisation',
+          name: '💡 Exemples d\'utilisation généraux',
           value: 
             '`!inscription 2180` - S\'inscrire au club ID 2180\n' +
             '`!club 2180` - Voir les infos du club ID 2180\n' +
@@ -44,33 +64,65 @@ module.exports = {
           inline: false
         },
         {
-          name: '🔔 Fonctionnement des notifications',
+          name: '💡 Exemples d\'utilisation enchères',
           value: 
-            '• **Notifications automatiques :** Vous recevrez des alertes pour les matchs\n' +
-            '• **Deadlines de composition :** Rappels 6h/3h/1h avant la deadline\n' +
-            '• **Par salon :** Chaque salon Discord peut s\'inscrire à ses propres clubs\n' +
-            '• **Plusieurs clubs :** Vous pouvez suivre plusieurs clubs par salon',
+            '`!encheres` - Surveiller enchères des clubs inscrits\n' +
+            '`!encheres 467622` - Surveiller enchères du joueur ID 467622\n' +
+            '`!encheres status` - Voir statut surveillance\n' +
+            '`!encheres stop` - Arrêter toutes surveillances\n' +
+            '`!encheres list` - Voir configuration actuelle',
           inline: false
         },
         {
-          name: '🎯 Comment trouver l\'ID d\'un club ?',
+          name: '🔔 Notifications automatiques',
           value: 
-            '• Utilisez `!club <nom>` pour rechercher par nom\n' +
-            '• L\'ID apparaît dans l\'URL du club sur Soccerverse.com\n' +
-            '• Exemple : soccerverse.com/clubs/2180 → ID = 2180',
+            '• **Matchs :** Deadlines de composition (6h/3h/1h avant)\n' +
+            '• **Résultats :** Score final automatiquement après les matchs\n' +
+            '• **Enchères :** Dépassements + fins imminentes (30/15/5/1 min)\n' +
+            '• **Orderbook :** Nouveaux ordres selon vos critères\n' +
+            '• **Stalker :** Transactions de parts des utilisateurs surveillés',
           inline: false
         },
         {
-          name: '🆘 Support',
+          name: '🔔 Fonctionnement des notifications enchères',
           value: 
-            '• Problème avec le bot ? Contactez les développeurs\n' +
-            '• Suggestions d\'améliorations bienvenues !\n' +
-            '• Version actuelle : **3.0.0**',
+            '• **Dépassements :** Alerte immédiate quand votre enchère est dépassée\n' +
+            '• **Fins imminentes :** Rappels à 30, 15, 5 et 1 minute(s) avant fin\n' +
+            '• **Types surveillés :** Enchères de vos clubs + joueurs spécifiques\n' +
+            '• **Fréquence :** Vérification toutes les 60 secondes\n' +
+            '• **Smart :** Pas de spam, notifications ciblées et intelligentes',
+          inline: false
+        },
+        {
+          name: '🎯 Comment trouver l\'ID d\'un club ou joueur ?',
+          value: 
+            '• **Clubs :** Utilisez `!club <nom>` pour rechercher par nom\n' +
+            '• **Joueurs :** L\'ID apparaît dans l\'URL sur Soccerverse.com\n' +
+            '• **Exemple club :** soccerverse.com/clubs/2180 → ID = 2180\n' +
+            '• **Exemple joueur :** soccerverse.com/player/467622 → ID = 467622',
+          inline: false
+        },
+        {
+          name: '📋 Fonctionnement par salon',
+          value: 
+            '• **Par salon Discord :** Chaque salon peut avoir ses propres clubs\n' +
+            '• **Plusieurs clubs :** Vous pouvez suivre plusieurs clubs par salon\n' +
+            '• **Permissions :** Certaines commandes nécessitent les droits admin\n' +
+            '• **Sauvegarde :** Toutes les configurations sont sauvegardées automatiquement',
+          inline: false
+        },
+        {
+          name: '🆘 Support et informations',
+          value: 
+            '• **Problème avec le bot ?** Contactez les développeurs\n' +
+            '• **Suggestions d\'améliorations** bienvenues !\n' +
+            '• **Version actuelle :** 3.0.0 avec surveillance enchères\n' +
+            '• **Source :** Bot non officiel pour la communauté Soccerverse',
           inline: false
         }
       )
       .setFooter({ 
-        text: 'Soccerverse Bot v3.0 • Bot non officiel', 
+        text: 'Soccerverse Bot v3.0 • Bot non officiel pour la communauté', 
         iconURL: 'https://downloads.soccerverse.com/default_profile.jpg' 
       })
       .setTimestamp();
