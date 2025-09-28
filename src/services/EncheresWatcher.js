@@ -130,13 +130,21 @@ class EncheresWatcher {
             club_id: clubId
           });
           
-          if (response && response.data && Array.isArray(response.data)) {
-            const clubAuctions = response.data.map(auction => ({
+          // CORRECTION: Traiter la structure de réponse correctement
+          let clubAuctions = [];
+          if (response && Array.isArray(response)) {
+            clubAuctions = response;
+          } else if (response && response.data && Array.isArray(response.data)) {
+            clubAuctions = response.data;
+          }
+          
+          if (clubAuctions.length > 0) {
+            const enrichedAuctions = clubAuctions.map(auction => ({
               ...auction,
               monitoring_club_id: clubId,
               source: 'club'
             }));
-            allAuctions.push(...clubAuctions);
+            allAuctions.push(...enrichedAuctions);
           }
           
           // Attendre 1 seconde entre chaque club
@@ -154,14 +162,22 @@ class EncheresWatcher {
             player_id: playerId
           });
           
-          if (response && response.data && response.data.started && response.data.end_time) {
+          // CORRECTION: Traiter la structure de réponse correctement
+          let auctionData = null;
+          if (response && response.data) {
+            auctionData = response.data;
+          } else if (response && response.started !== undefined) {
+            auctionData = response;
+          }
+          
+          if (auctionData && auctionData.started && auctionData.end_time) {
             const playerAuction = {
-              transfer_auction_id: response.data.transfer_auction_id,
-              player_id: response.data.player_id,
-              highest_bid: response.data.high_bid ? response.data.high_bid.amount : response.data.minimum_bid,
-              highest_bidder: response.data.high_bid ? response.data.high_bid.club_id : response.data.club_id,
-              self_bid: 0,
-              end_timestamp: response.data.end_time,
+              transfer_auction_id: auctionData.transfer_auction_id,
+              player_id: auctionData.player_id,
+              highest_bid: auctionData.high_bid ? auctionData.high_bid.amount : auctionData.minimum_bid,
+              highest_bidder: auctionData.high_bid ? auctionData.high_bid.club_id : auctionData.club_id,
+              self_bid: 0, // Pas de self_bid pour les joueurs surveillés
+              end_timestamp: auctionData.end_time,
               source: 'player',
               monitoring_club_id: null
             };
@@ -181,19 +197,30 @@ class EncheresWatcher {
         }
       }
       
-      // Enrichir avec les timestamps de fin pour les enchères de clubs
+      // CORRECTION: Enrichir avec les timestamps de fin pour les enchères de clubs
       for (const auction of allAuctions) {
-        if (auction.source === 'club' && !auction.end_timestamp) {
+        if (auction.source === 'club' && !auction.end_timestamp && auction.player_id) {
           try {
             const detailResponse = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
               player_id: auction.player_id
             });
             
-            if (detailResponse && detailResponse.data && detailResponse.data.end_time) {
-              auction.end_timestamp = detailResponse.data.end_time;
+            let detailData = null;
+            if (detailResponse && detailResponse.data) {
+              detailData = detailResponse.data;
+            } else if (detailResponse && detailResponse.end_time !== undefined) {
+              detailData = detailResponse;
             }
+            
+            if (detailData && detailData.end_time) {
+              auction.end_timestamp = detailData.end_time;
+            }
+            
+            // Attendre 500ms entre chaque requête de détail
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
           } catch (error) {
-            logger.debug(`Impossible de récupérer le timestamp pour l'enchère ${auction.transfer_auction_id}`);
+            logger.debug(`Impossible de récupérer le timestamp pour l'enchère ${auction.transfer_auction_id || 'inconnue'}`);
           }
         }
       }
@@ -209,6 +236,9 @@ class EncheresWatcher {
     for (const auction of auctions) {
       // Ignorer les joueurs surveillés car ils n'ont pas de self_bid
       if (auction.source === 'player') continue;
+      
+      // S'assurer que nous avons un ID d'enchère valide
+      if (!auction.transfer_auction_id) continue;
       
       const auctionKey = `${channelId}_${auction.transfer_auction_id}`;
       const previous = this.previousBids.get(auctionKey);
@@ -236,10 +266,13 @@ class EncheresWatcher {
     const now = Math.floor(Date.now() / 1000);
     
     for (const auction of auctions) {
-      if (!auction.end_timestamp) continue;
+      if (!auction.end_timestamp || !auction.transfer_auction_id) continue;
       
       const remaining = auction.end_timestamp - now;
       const remainingMinutes = Math.floor(remaining / 60);
+      
+      // Ignorer les enchères déjà terminées ou trop lointaines
+      if (remainingMinutes <= 0 || remainingMinutes > 60) continue;
       
       for (const notifyMinutes of notificationTimes) {
         const notificationKey = `${channelId}_${auction.transfer_auction_id}_${notifyMinutes}`;
@@ -394,7 +427,7 @@ class EncheresWatcher {
   formatCurrency(amount) {
     if (!amount || amount === 0) return '0$';
     
-    // L'API renvoie les montants en centimes
+    // L'API renvoie les montants qu'il faut diviser par 10 000
     const dollars = Math.ceil(amount / 10000);
     
     if (dollars >= 1000000000) {
@@ -423,13 +456,22 @@ class EncheresWatcher {
 
   cleanupOldNotifications() {
     const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    let cleanedCount = 0;
     
+    // CORRECTION: Nettoyer efficacement les notifications anciennes
     for (const notificationKey of this.notifiedEndingSoon) {
-      // Nettoyer les notifications anciennes (basique pour l'instant)
-      // Une implémentation plus sophistiquée pourrait stocker les timestamps
+      // Format de clé: channelId_auctionId_minutes
+      // Pour une vraie implémentation, nous devrions stocker les timestamps
+      // Ici, on fait un nettoyage basique toutes les 24h
+      if (Math.random() < 0.1) { // 10% de chance de nettoyer chaque clé
+        this.notifiedEndingSoon.delete(notificationKey);
+        cleanedCount++;
+      }
     }
     
-    logger.debug(`🧹 Nettoyage notifications enchères`);
+    if (cleanedCount > 0) {
+      logger.debug(`🧹 Nettoyage notifications enchères: ${cleanedCount} entrées supprimées`);
+    }
   }
 
   // =================== MÉTHODES DE GESTION ===================
@@ -466,7 +508,9 @@ class EncheresWatcher {
       notificationsSent: this.stats.notificationsSent,
       outbidsDetected: this.stats.outbidsDetected,
       endingAlertsSent: this.stats.endingAlertsSent,
-      checkInterval: this.checkInterval / 1000
+      checkInterval: this.checkInterval / 1000,
+      cacheSize: this.previousBids.size,
+      notifiedCount: this.notifiedEndingSoon.size
     };
   }
 
@@ -485,6 +529,28 @@ class EncheresWatcher {
       endingAlertsSent: 0
     };
     logger.info('🔄 Cache enchères réinitialisé');
+  }
+
+  // Debug: Afficher les enchères surveillées
+  debugEncheresWatching() {
+    logger.debug('=== ENCHÈRES SURVEILLANCE DEBUG ===');
+    const watchedChannels = this.getWatchedChannels();
+    
+    if (watchedChannels.length === 0) {
+      logger.debug('Aucune surveillance active');
+    } else {
+      for (const config of watchedChannels) {
+        logger.debug(`Canal ${config.channelId}:`);
+        logger.debug(`  └ Clubs: [${config.clubs.join(', ')}]`);
+        logger.debug(`  └ Joueurs: [${config.players.join(', ')}]`);
+        logger.debug(`  └ Notifications: [${config.notificationTimes.join(', ')}] minutes`);
+      }
+    }
+    
+    logger.debug(`Cache enchères précédentes: ${this.previousBids.size}`);
+    logger.debug(`Cache notifications envoyées: ${this.notifiedEndingSoon.size}`);
+    logger.debug(`Statistiques: ${JSON.stringify(this.stats, null, 2)}`);
+    logger.debug('=== FIN DEBUG ENCHÈRES ===');
   }
 }
 
