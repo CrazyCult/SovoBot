@@ -9,7 +9,8 @@ const OrderbookWatcher = require('./src/services/OrderbookWatcher');
 const MatchNotificationWatcher = require('./src/services/MatchNotificationWatcher');
 const MatchResultWatcher = require('./src/services/MatchResultWatcher');
 const PolygonStalkerService = require('./src/services/PolygonStalkerService');
-const EncheresWatcher = require('./src/services/EncheresWatcher');
+// SUPPRIMER CETTE LIGNE QUI CAUSE L'ERREUR :
+// const EncheresWatcher = require('./src/services/EncheresWatcher');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -37,7 +38,8 @@ class SoccerverseBot {
     this.matchNotificationWatcher = null;
     this.matchResultWatcher = null;
     this.polygonStalkerService = null;
-    this.encheresWatcher = null;
+    // SUPPRIMER CETTE LIGNE AUSSI :
+    // this.encheresWatcher = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -93,9 +95,9 @@ class SoccerverseBot {
       this.polygonStalkerService = new PolygonStalkerService(this.client, this.dataManager, this.apiClient);
       logger.info('👥 Service Stalker Soccerverse initialisé');
       
-      // Initialiser le service de surveillance des enchères
-      this.encheresWatcher = new EncheresWatcher(this.client, this.dataManager, this.apiClient);
-      logger.info('🏆 Service de surveillance des enchères initialisé');
+      // SUPPRIMER CETTE SECTION ENCHERES :
+      // this.encheresWatcher = new EncheresWatcher(this.client, this.dataManager, this.apiClient);
+      // logger.info('🏆 Service de surveillance des enchères initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -121,8 +123,9 @@ class SoccerverseBot {
           orderbookWatcher: this.orderbookWatcher,
           matchNotificationWatcher: this.matchNotificationWatcher,
           matchResultWatcher: this.matchResultWatcher,
-          polygonStalkerService: this.polygonStalkerService,
-          encheresWatcher: this.encheresWatcher
+          polygonStalkerService: this.polygonStalkerService
+          // SUPPRIMER CETTE LIGNE :
+          // encheresWatcher: this.encheresWatcher
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -175,9 +178,6 @@ class SoccerverseBot {
           break;
         case 'stalker':
           await this.handleStalkerButton(interaction, params);
-          break;
-        case 'encheres':
-          await this.handleEncheresButton(interaction, params);
           break;
         default:
           await interaction.reply({
@@ -299,8 +299,7 @@ class SoccerverseBot {
               orderbookWatcher: this.orderbookWatcher,
               matchNotificationWatcher: this.matchNotificationWatcher,
               matchResultWatcher: this.matchResultWatcher,
-              polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher
+              polygonStalkerService: this.polygonStalkerService
             });
           }
         } catch (error) {
@@ -372,8 +371,7 @@ class SoccerverseBot {
               orderbookWatcher: this.orderbookWatcher,
               matchNotificationWatcher: this.matchNotificationWatcher,
               matchResultWatcher: this.matchResultWatcher,
-              polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher
+              polygonStalkerService: this.polygonStalkerService
             });
           }
         } catch (error) {
@@ -422,74 +420,6 @@ class SoccerverseBot {
       default:
         await interaction.reply({ 
           content: '❌ Action stalker non reconnue.', 
-          flags: 64 // Ephemeral flag 
-        });
-    }
-  }
-
-  async handleEncheresButton(interaction, params) {
-    const [action] = params;
-    const channelId = interaction.channel.id;
-    
-    switch (action) {
-      case 'start':
-        if (this.encheresWatcher) {
-          this.encheresWatcher.enableWatching(channelId);
-          await this.dataManager.save();
-          
-          await interaction.reply({
-            content: '✅ Surveillance des enchères démarrée !',
-            flags: 64 // Ephemeral flag
-          });
-        }
-        break;
-        
-      case 'stop':
-        if (this.encheresWatcher) {
-          this.encheresWatcher.disableWatching(channelId);
-          await this.dataManager.save();
-          
-          await interaction.reply({
-            content: '✅ Surveillance des enchères arrêtée.',
-            flags: 64 // Ephemeral flag
-          });
-        }
-        break;
-        
-      case 'status':
-        try {
-          const encheresCommand = this.commands.get('encheres');
-          if (encheresCommand) {
-            await interaction.deferReply();
-            
-            const simulatedMessage = {
-              channel: interaction.channel,
-              reply: async (options) => {
-                await interaction.editReply(options);
-              }
-            };
-            
-            await encheresCommand.execute(simulatedMessage, ['status'], {
-              apiClient: this.apiClient,
-              dataManager: this.dataManager,
-              orderbookWatcher: this.orderbookWatcher,
-              matchNotificationWatcher: this.matchNotificationWatcher,
-              matchResultWatcher: this.matchResultWatcher,
-              polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher
-            });
-          }
-        } catch (error) {
-          await interaction.reply({
-            content: '❌ Erreur lors de l\'affichage du statut.',
-            flags: 64 // Ephemeral flag
-          });
-        }
-        break;
-        
-      default:
-        await interaction.reply({ 
-          content: '❌ Action enchères non reconnue.', 
           flags: 64 // Ephemeral flag 
         });
     }
