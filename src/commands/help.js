@@ -20,7 +20,6 @@ module.exports = {
             '**`!matchs [club_id]`** - Voir les matchs d\'un club (dernier et prochain)\n' +
             '**`!calendrier [club_id]`** - Voir le calendrier des prochains matchs\n' +
             '**`!classement [club_id]`** - Voir le classement de la ligue\n' +
-            '**`!encheres [player_id|start|stop|status]`** - Surveiller les enchères\n' +
             '**`!help`** - Afficher cette aide',
           inline: false
         },
@@ -29,30 +28,42 @@ module.exports = {
           value: 
             '**`!encheres`** - Démarrer surveillance pour clubs inscrits\n' +
             '**`!encheres <player_id>`** - Ajouter un joueur à surveiller\n' +
-            '**`!encheres stop`** - Arrêter la surveillance\n' +
+            '**`!encheres <player_id> remove`** - Retirer un joueur de la surveillance\n' +
+            '**`!encheres stop`** - Arrêter toutes les surveillances\n' +
             '**`!encheres status`** - Voir le statut de la surveillance\n' +
             '**`!encheres list`** - Voir les clubs/joueurs surveillés',
           inline: false
         },
         {
-          name: '📊 Surveillance Avancée',
+          name: '📊 Surveillance Orderbook',
           value: 
             '**`!orderbook [club_id] [min] [max]`** - Surveiller les ordres de parts\n' +
-            '**`!watchlist [stop] [club_id]`** - Gérer les surveillances orderbook\n' +
-            '**`!stalker <username> [add|remove]`** - Surveiller un utilisateur (admin)',
+            '**`!watchlist`** - Gérer les surveillances orderbook actives\n' +
+            '**`!watchlist stop [club_id]`** - Arrêter surveillance orderbook\n' +
+            '**`!stopwatch [club_id]`** - Arrêter rapidement une surveillance',
+          inline: false
+        },
+        {
+          name: '👥 Surveillance Utilisateurs (Stalker)',
+          value: 
+            '**`!stalker <username>`** - Surveiller les transactions d\'un utilisateur\n' +
+            '**`!stalker <username> remove`** - Arrêter surveillance d\'un utilisateur\n' +
+            '**`!stalker list`** - Voir tous les utilisateurs surveillés\n' +
+            '**`!stalker status`** - Statut du service stalker',
           inline: false
         },
         {
           name: '⚙️ Commandes admin',
           value: 
             '**`!notifications [status|test|reset]`** - Gérer les notifications (admin)\n' +
-            '**`!update`** - Mettre à jour les mappings (admin)\n' +
+            '**`!nextresults`** - Voir les prochains résultats programmés (admin)\n' +
+            '**`!update`** - Mettre à jour les mappings de noms (admin)\n' +
             '**`!reload <commande>`** - Recharger une commande (admin)\n' +
             '**`!stalkeradmin [status|test|reset]`** - Admin service stalker (admin)',
           inline: false
         },
         {
-          name: '💡 Exemples d\'utilisation généraux',
+          name: '💡 Exemples - Commandes générales',
           value: 
             '`!inscription 2180` - S\'inscrire au club ID 2180\n' +
             '`!club 2180` - Voir les infos du club ID 2180\n' +
@@ -64,13 +75,32 @@ module.exports = {
           inline: false
         },
         {
-          name: '💡 Exemples d\'utilisation enchères',
+          name: '💡 Exemples - Enchères',
           value: 
             '`!encheres` - Surveiller enchères des clubs inscrits\n' +
             '`!encheres 467622` - Surveiller enchères du joueur ID 467622\n' +
+            '`!encheres 467622 remove` - Retirer le joueur de la surveillance\n' +
             '`!encheres status` - Voir statut surveillance\n' +
             '`!encheres stop` - Arrêter toutes surveillances\n' +
             '`!encheres list` - Voir configuration actuelle',
+          inline: false
+        },
+        {
+          name: '💡 Exemples - Orderbook',
+          value: 
+            '`!orderbook 2180` - Voir l\'orderbook du club 2180\n' +
+            '`!orderbook 2180 1000 5000` - Surveiller ordres entre 1000$ et 5000$\n' +
+            '`!watchlist` - Voir toutes les surveillances orderbook\n' +
+            '`!stopwatch` - Arrêter rapidement toutes les surveillances',
+          inline: false
+        },
+        {
+          name: '💡 Exemples - Stalker',
+          value: 
+            '`!stalker CrazyCult` - Surveiller les transactions de CrazyCult\n' +
+            '`!stalker GamblerTheOne` - Surveiller GamblerTheOne\n' +
+            '`!stalker CrazyCult remove` - Arrêter surveillance\n' +
+            '`!stalker list` - Voir tous les utilisateurs surveillés',
           inline: false
         },
         {
@@ -79,18 +109,23 @@ module.exports = {
             '• **Matchs :** Deadlines de composition (6h/3h/1h avant)\n' +
             '• **Résultats :** Score final automatiquement après les matchs\n' +
             '• **Enchères :** Dépassements + fins imminentes (30/15/5/1 min)\n' +
+            '  └ Notification de fin + suppression auto quand enchère terminée\n' +
+            '  └ Vous êtes mentionné (@vous) dans chaque notification\n' +
             '• **Orderbook :** Nouveaux ordres selon vos critères\n' +
             '• **Stalker :** Transactions de parts des utilisateurs surveillés',
           inline: false
         },
         {
-          name: '🔔 Fonctionnement des notifications enchères',
+          name: '🏆 Fonctionnement des enchères',
           value: 
             '• **Dépassements :** Alerte immédiate quand votre enchère est dépassée\n' +
             '• **Fins imminentes :** Rappels à 30, 15, 5 et 1 minute(s) avant fin\n' +
+            '• **Fin d\'enchère :** Notification finale avec vainqueur et prix\n' +
+            '• **Suppression auto :** Le joueur est retiré automatiquement quand l\'enchère se termine\n' +
+            '• **Suppression manuelle :** `!encheres <player_id> remove`\n' +
             '• **Types surveillés :** Enchères de vos clubs + joueurs spécifiques\n' +
             '• **Fréquence :** Vérification toutes les 60 secondes\n' +
-            '• **Smart :** Pas de spam, notifications ciblées et intelligentes',
+            '• **Smart :** Pas de spam, notifications uniques et intelligentes',
           inline: false
         },
         {
@@ -116,7 +151,7 @@ module.exports = {
           value: 
             '• **Problème avec le bot ?** Contactez les développeurs\n' +
             '• **Suggestions d\'améliorations** bienvenues !\n' +
-            '• **Version actuelle :** 3.0.0 avec surveillance enchères\n' +
+            '• **Version actuelle :** 3.0.0 avec surveillance enchères complète\n' +
             '• **Source :** Bot non officiel pour la communauté Soccerverse',
           inline: false
         }
