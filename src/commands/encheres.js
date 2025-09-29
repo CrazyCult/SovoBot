@@ -3,7 +3,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 module.exports = {
   name: 'encheres',
   description: 'Surveiller les enchères de transferts de vos clubs inscrits ou de joueurs spécifiques',
-  usage: '!encheres [player_id] [start|stop|status|list]',
+  usage: '!encheres [player_id] [start|stop|status|list|remove]',
   
   async execute(message, args, { apiClient, dataManager, encheresWatcher }) {
     const channelId = message.channel.id;
@@ -12,6 +12,12 @@ module.exports = {
     // Si premier argument est un nombre, c'est un ID de joueur
     if (args.length > 0 && !isNaN(args[0])) {
       const playerId = parseInt(args[0]);
+      const subAction = args[1]?.toLowerCase();
+      
+      if (subAction === 'remove') {
+        return await this.removePlayerFromWatch(message, playerId, channelId, { dataManager, apiClient });
+      }
+      
       return await this.addPlayerToWatch(message, playerId, channelId, { dataManager, apiClient });
     }
 
@@ -50,8 +56,7 @@ module.exports = {
         .addFields({
           name: '💡 Pour commencer',
           value: '• `!inscription <club_id>` - Inscrire un club\n• `!encheres <player_id>` - Surveiller un joueur spécifique'
-        })
-        .setFooter({ text: 'Soccerverse Bot v3.0' });
+        });
       
       await message.reply({ embeds: [embed] });
       return;
@@ -80,7 +85,7 @@ module.exports = {
       startedAt: Date.now(),
       clubs: registeredClubs.map(id => parseInt(id)),
       players: settings.encheresWatching?.players || [],
-      notificationTimes: [30, 15, 5, 1], // minutes avant fin
+      notificationTimes: [30, 15, 5, 1],
       lastCheck: null
     };
 
@@ -263,6 +268,62 @@ module.exports = {
     }
   },
 
+  async removePlayerFromWatch(message, playerId, channelId, { dataManager, apiClient }) {
+    try {
+      const settings = dataManager.getChannelSettings(channelId);
+      const encheresWatching = settings.encheresWatching;
+      
+      if (!encheresWatching || !encheresWatching.players || !encheresWatching.players.includes(playerId)) {
+        const embed = new EmbedBuilder()
+          .setColor('#FFA500')
+          .setTitle('⚠️ Joueur non surveillé')
+          .setDescription(`Le joueur #${playerId} n'est pas dans la liste de surveillance.`)
+          .addFields({
+            name: '📋 Voir la liste',
+            value: '`!encheres list` pour voir tous les joueurs surveillés'
+          });
+        
+        await message.reply({ embeds: [embed] });
+        return;
+      }
+
+      const playerName = apiClient.getPlayerName(playerId);
+      const playerIndex = encheresWatching.players.indexOf(playerId);
+      encheresWatching.players.splice(playerIndex, 1);
+      
+      dataManager.setChannelSettings(channelId, {
+        encheresWatching: encheresWatching
+      });
+      
+      await dataManager.save();
+
+      const embed = new EmbedBuilder()
+        .setColor('#4CAF50')
+        .setTitle('✅ Joueur Retiré de la Surveillance')
+        .setDescription(`**${playerName}** (#${playerId}) a été retiré de la surveillance des enchères.`)
+        .addFields({
+          name: '📊 Statut',
+          value: 'Vous ne recevrez plus de notifications pour ce joueur.',
+          inline: false
+        })
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+
+    } catch (error) {
+      const embed = new EmbedBuilder()
+        .setColor('#FF6B6B')
+        .setTitle('❌ Erreur')
+        .setDescription(`Impossible de retirer le joueur #${playerId} de la surveillance.`)
+        .addFields({
+          name: '🔧 Détails',
+          value: `\`\`\`${error.message}\`\`\``
+        });
+      
+      await message.reply({ embeds: [embed] });
+    }
+  },
+
   async showStatus(message, channelId, { dataManager, encheresWatcher }) {
     const settings = dataManager.getChannelSettings(channelId);
     const encheresWatching = settings.encheresWatching;
@@ -373,6 +434,7 @@ module.exports = {
       encheresWatching.players.forEach((playerId, index) => {
         const playerName = apiClient.getPlayerName(playerId);
         playersList += `**${index + 1}.** 👤 [${playerName}](https://play.soccerverse.com/player/${playerId}) (#${playerId})\n`;
+        playersList += `   └ \`!encheres ${playerId} remove\` pour retirer\n`;
       });
 
       embed.addFields({
