@@ -7,16 +7,11 @@ class EncheresWatcher {
     this.dataManager = dataManager;
     this.apiClient = apiClient;
     
-    // Cache des enchères précédentes pour détecter les changements
     this.previousBids = new Map();
-    
-    // Cache des notifications de fin envoyées
+    this.previousChannelAuctions = new Map();
     this.notifiedEndingSoon = new Set();
-    
-    // Intervalle de vérification (60 secondes)
     this.checkInterval = 60 * 1000;
     
-    // Statistiques
     this.stats = {
       totalChecks: 0,
       notificationsSent: 0,
@@ -28,12 +23,10 @@ class EncheresWatcher {
   }
 
   startWatching() {
-    // Vérification initiale après 30 secondes
     setTimeout(() => {
       this.checkAllWatchedAuctions();
     }, 30000);
     
-    // Puis vérification toutes les 60 secondes
     setInterval(() => {
       this.checkAllWatchedAuctions();
     }, this.checkInterval);
@@ -55,19 +48,13 @@ class EncheresWatcher {
       for (const channelConfig of watchedChannels) {
         try {
           await this.checkChannelAuctions(channelConfig);
-          
-          // Mettre à jour la dernière vérification
           this.updateLastCheck(channelConfig.channelId);
-          
-          // Attendre 2 secondes entre chaque canal
           await new Promise(resolve => setTimeout(resolve, 2000));
-          
         } catch (error) {
           logger.error(`Erreur vérification enchères canal ${channelConfig.channelId}:`, error);
         }
       }
       
-      // Nettoyer les anciennes notifications
       this.cleanupOldNotifications();
       
     } catch (error) {
@@ -98,7 +85,6 @@ class EncheresWatcher {
     const { channelId, clubs, players } = channelConfig;
     
     try {
-      // Récupérer toutes les enchères actives
       const allAuctions = await this.fetchAllAuctions(clubs, players);
       
       if (allAuctions.length === 0) {
@@ -108,10 +94,16 @@ class EncheresWatcher {
       
       logger.debug(`📊 ${allAuctions.length} enchère(s) trouvée(s) pour le canal ${channelId}`);
       
-      // Vérifier les dépassements
-      await this.checkForOutbids(channelId, allAuctions);
+      const channelKey = `channel_${channelId}`;
+      const previousAuctions = this.previousChannelAuctions.get(channelKey) || [];
       
-      // Vérifier les fins imminentes
+      if (previousAuctions.length > 0) {
+        await this.checkFinishedAuctions(channelId, previousAuctions, allAuctions);
+      }
+      
+      this.previousChannelAuctions.set(channelKey, allAuctions);
+      
+      await this.checkForOutbids(channelId, allAuctions);
       await this.checkEndingSoon(channelId, allAuctions, channelConfig.notificationTimes);
       
     } catch (error) {
@@ -123,14 +115,12 @@ class EncheresWatcher {
     const allAuctions = [];
     
     try {
-      // Récupérer les enchères des clubs
       for (const clubId of clubs) {
         try {
           const response = await this.apiClient.makeRpcRequest('get_clubs_transfer_bids', {
             club_id: clubId
           });
           
-          // CORRECTION: Traiter la structure de réponse correctement
           let clubAuctions = [];
           if (response && Array.isArray(response)) {
             clubAuctions = response;
@@ -147,7 +137,6 @@ class EncheresWatcher {
             allAuctions.push(...enrichedAuctions);
           }
           
-          // Attendre 1 seconde entre chaque club
           await new Promise(resolve => setTimeout(resolve, 1000));
           
         } catch (error) {
@@ -155,14 +144,12 @@ class EncheresWatcher {
         }
       }
       
-      // Récupérer les enchères des joueurs spécifiques
       for (const playerId of players) {
         try {
           const response = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
             player_id: playerId
           });
           
-          // CORRECTION: Traiter la structure de réponse correctement
           let auctionData = null;
           if (response && response.data) {
             auctionData = response.data;
@@ -176,20 +163,18 @@ class EncheresWatcher {
               player_id: auctionData.player_id,
               highest_bid: auctionData.high_bid ? auctionData.high_bid.amount : auctionData.minimum_bid,
               highest_bidder: auctionData.high_bid ? auctionData.high_bid.club_id : auctionData.club_id,
-              self_bid: 0, // Pas de self_bid pour les joueurs surveillés
+              self_bid: 0,
               end_timestamp: auctionData.end_time,
               source: 'player',
               monitoring_club_id: null
             };
             
-            // Éviter les doublons si le joueur est aussi dans les enchères du club
             const exists = allAuctions.find(a => a.transfer_auction_id === playerAuction.transfer_auction_id);
             if (!exists) {
               allAuctions.push(playerAuction);
             }
           }
           
-          // Attendre 1 seconde entre chaque joueur
           await new Promise(resolve => setTimeout(resolve, 1000));
           
         } catch (error) {
@@ -197,7 +182,6 @@ class EncheresWatcher {
         }
       }
       
-      // CORRECTION: Enrichir avec les timestamps de fin pour les enchères de clubs
       for (const auction of allAuctions) {
         if (auction.source === 'club' && !auction.end_timestamp && auction.player_id) {
           try {
@@ -216,7 +200,6 @@ class EncheresWatcher {
               auction.end_timestamp = detailData.end_time;
             }
             
-            // Attendre 500ms entre chaque requête de détail
             await new Promise(resolve => setTimeout(resolve, 500));
             
           } catch (error) {
@@ -232,12 +215,112 @@ class EncheresWatcher {
     return allAuctions;
   }
 
+  async checkFinishedAuctions(channelId, previousAuctions, currentAuctions) {
+    const currentAuctionIds = new Set(currentAuctions.map(a => a.transfer_auction_id));
+    
+    for (const prevAuction of previousAuctions) {
+      if (!currentAuctionIds.has(prevAuction.transfer_auction_id)) {
+        await this.sendAuctionFinishedNotification(channelId, prevAuction);
+        
+        if (prevAuction.source === 'player') {
+          await this.removePlayerFromWatch(channelId, prevAuction.player_id);
+        }
+      }
+    }
+  }
+
+  async sendAuctionFinishedNotification(channelId, auction) {
+    try {
+      const channel = this.client.channels.cache.get(channelId);
+      if (!channel) return;
+      
+      const settings = this.dataManager.getChannelSettings(channelId);
+      const startedBy = settings.encheresWatching?.startedBy;
+      
+      const playerName = this.apiClient.getPlayerName(auction.player_id);
+      
+      let winnerName = 'Inconnu';
+      let finalPrice = auction.highest_bid || 0;
+      
+      try {
+        const finalDetails = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
+          player_id: auction.player_id
+        });
+        
+        if (finalDetails && finalDetails.data) {
+          if (finalDetails.data.high_bid) {
+            winnerName = this.apiClient.getClubName(finalDetails.data.high_bid.club_id);
+            finalPrice = finalDetails.data.high_bid.amount;
+          }
+        }
+      } catch (error) {
+        logger.debug(`Impossible de récupérer les détails finaux pour ${playerName}`);
+      }
+      
+      const embed = new EmbedBuilder()
+        .setColor('#4CAF50')
+        .setTitle('🏁 Enchère Terminée !')
+        .setThumbnail(`https://elrincondeldt.com/sv/photos/players/${auction.player_id}.png`)
+        .setDescription(`${startedBy ? `<@${startedBy}> ` : ''}L'enchère pour **${playerName}** est terminée.`)
+        .addFields(
+          {
+            name: '👤 Joueur',
+            value: `[${playerName}](https://play.soccerverse.com/player/${auction.player_id})`,
+            inline: true
+          },
+          {
+            name: '🏆 Vainqueur',
+            value: winnerName,
+            inline: true
+          },
+          {
+            name: '💰 Prix Final',
+            value: this.formatCurrency(finalPrice),
+            inline: true
+          },
+          {
+            name: '📊 Statut',
+            value: '✅ Le joueur a été retiré de la surveillance automatiquement',
+            inline: false
+          }
+        )
+        .setFooter({ 
+          text: 'Surveillance automatique terminée • Soccerverse Bot v3.0' 
+        })
+        .setTimestamp();
+
+      await channel.send({ embeds: [embed] });
+      
+      logger.info(`🏁 Notification fin enchère envoyée: ${playerName} → ${winnerName}`);
+      
+    } catch (error) {
+      logger.error('Erreur envoi notification fin enchère:', error);
+    }
+  }
+
+  async removePlayerFromWatch(channelId, playerId) {
+    try {
+      const settings = this.dataManager.getChannelSettings(channelId);
+      
+      if (settings.encheresWatching && settings.encheresWatching.players) {
+        const playerIndex = settings.encheresWatching.players.indexOf(playerId);
+        
+        if (playerIndex > -1) {
+          settings.encheresWatching.players.splice(playerIndex, 1);
+          this.dataManager.setChannelSettings(channelId, settings);
+          await this.dataManager.save();
+          
+          logger.info(`🗑️ Joueur ${playerId} retiré automatiquement de la surveillance (enchère terminée)`);
+        }
+      }
+    } catch (error) {
+      logger.error('Erreur suppression automatique joueur:', error);
+    }
+  }
+
   async checkForOutbids(channelId, auctions) {
     for (const auction of auctions) {
-      // Ignorer les joueurs surveillés car ils n'ont pas de self_bid
       if (auction.source === 'player') continue;
-      
-      // S'assurer que nous avons un ID d'enchère valide
       if (!auction.transfer_auction_id) continue;
       
       const auctionKey = `${channelId}_${auction.transfer_auction_id}`;
@@ -253,7 +336,6 @@ class EncheresWatcher {
         }
       }
       
-      // Mettre à jour le cache
       this.previousBids.set(auctionKey, {
         highest_bid: auction.highest_bid,
         self_bid: auction.self_bid,
@@ -271,16 +353,21 @@ class EncheresWatcher {
       const remaining = auction.end_timestamp - now;
       const remainingMinutes = Math.floor(remaining / 60);
       
-      // Ignorer les enchères déjà terminées ou trop lointaines
       if (remainingMinutes <= 0 || remainingMinutes > 60) continue;
       
       for (const notifyMinutes of notificationTimes) {
         const notificationKey = `${channelId}_${auction.transfer_auction_id}_${notifyMinutes}`;
         
-        if (remainingMinutes <= notifyMinutes && remainingMinutes > 0 && !this.notifiedEndingSoon.has(notificationKey)) {
+        const minWindow = notifyMinutes - 1;
+        const maxWindow = notifyMinutes;
+        const isInTimeWindow = remainingMinutes >= minWindow && remainingMinutes <= maxWindow;
+        
+        if (isInTimeWindow && !this.notifiedEndingSoon.has(notificationKey)) {
           await this.sendEndingSoonNotification(channelId, auction, notifyMinutes);
           this.notifiedEndingSoon.add(notificationKey);
           this.stats.endingAlertsSent++;
+          
+          logger.debug(`🔔 Notification programmée: ${notificationKey} (${remainingMinutes} min restantes)`);
         }
       }
     }
@@ -294,6 +381,9 @@ class EncheresWatcher {
         return;
       }
       
+      const settings = this.dataManager.getChannelSettings(channelId);
+      const startedBy = settings.encheresWatching?.startedBy;
+      
       const playerName = this.apiClient.getPlayerName(auction.player_id);
       const bidderName = this.apiClient.getClubName(auction.highest_bidder);
       const clubName = this.apiClient.getClubName(auction.monitoring_club_id);
@@ -302,7 +392,7 @@ class EncheresWatcher {
         .setColor('#FF4444')
         .setTitle('🚨 Enchère Dépassée !')
         .setThumbnail(`https://elrincondeldt.com/sv/photos/players/${auction.player_id}.png`)
-        .setDescription(`Votre enchère pour **${playerName}** a été dépassée !`)
+        .setDescription(`${startedBy ? `<@${startedBy}> ` : ''}Votre enchère pour **${playerName}** a été dépassée !`)
         .addFields(
           {
             name: '👤 Joueur',
@@ -358,6 +448,9 @@ class EncheresWatcher {
         return;
       }
       
+      const settings = this.dataManager.getChannelSettings(channelId);
+      const startedBy = settings.encheresWatching?.startedBy;
+      
       const playerName = this.apiClient.getPlayerName(auction.player_id);
       const bidderName = this.apiClient.getClubName(auction.highest_bidder);
       
@@ -376,7 +469,7 @@ class EncheresWatcher {
         .setColor(urgencyColor)
         .setTitle(`${urgencyEmoji} Enchère se termine dans ${minutesLeft} minute${minutesLeft > 1 ? 's' : ''} !`)
         .setThumbnail(`https://elrincondeldt.com/sv/photos/players/${auction.player_id}.png`)
-        .setDescription(`**${playerName}** - Dernière chance d'enchérir !`)
+        .setDescription(`${startedBy ? `<@${startedBy}> ` : ''}**${playerName}** - Dernière chance d'enchérir !`)
         .addFields(
           {
             name: '👤 Joueur',
@@ -427,7 +520,6 @@ class EncheresWatcher {
   formatCurrency(amount) {
     if (!amount || amount === 0) return '0$';
     
-    // L'API renvoie les montants qu'il faut diviser par 10 000
     const dollars = Math.ceil(amount / 10000);
     
     if (dollars >= 1000000000) {
@@ -455,26 +547,24 @@ class EncheresWatcher {
   }
 
   cleanupOldNotifications() {
-    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-    let cleanedCount = 0;
-    
-    // CORRECTION: Nettoyer efficacement les notifications anciennes
-    for (const notificationKey of this.notifiedEndingSoon) {
-      // Format de clé: channelId_auctionId_minutes
-      // Pour une vraie implémentation, nous devrions stocker les timestamps
-      // Ici, on fait un nettoyage basique toutes les 24h
-      if (Math.random() < 0.1) { // 10% de chance de nettoyer chaque clé
-        this.notifiedEndingSoon.delete(notificationKey);
-        cleanedCount++;
+    if (this.notifiedEndingSoon.size > 500) {
+      let cleanedCount = 0;
+      const toDelete = [];
+      
+      for (const notificationKey of this.notifiedEndingSoon) {
+        if (Math.random() < 0.2) {
+          toDelete.push(notificationKey);
+          cleanedCount++;
+        }
+      }
+      
+      toDelete.forEach(key => this.notifiedEndingSoon.delete(key));
+      
+      if (cleanedCount > 0) {
+        logger.debug(`🧹 Nettoyage notifications enchères: ${cleanedCount} entrées supprimées (total: ${this.notifiedEndingSoon.size})`);
       }
     }
-    
-    if (cleanedCount > 0) {
-      logger.debug(`🧹 Nettoyage notifications enchères: ${cleanedCount} entrées supprimées`);
-    }
   }
-
-  // =================== MÉTHODES DE GESTION ===================
 
   enableWatching(channelId) {
     const settings = this.dataManager.getChannelSettings(channelId);
@@ -521,6 +611,7 @@ class EncheresWatcher {
 
   resetEncheresCache() {
     this.previousBids.clear();
+    this.previousChannelAuctions.clear();
     this.notifiedEndingSoon.clear();
     this.stats = {
       totalChecks: 0,
@@ -531,7 +622,6 @@ class EncheresWatcher {
     logger.info('🔄 Cache enchères réinitialisé');
   }
 
-  // Debug: Afficher les enchères surveillées
   debugEncheresWatching() {
     logger.debug('=== ENCHÈRES SURVEILLANCE DEBUG ===');
     const watchedChannels = this.getWatchedChannels();
