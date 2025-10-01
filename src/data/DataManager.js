@@ -6,7 +6,7 @@ class DataManager {
   constructor() {
     this.dataFile = path.join(__dirname, '..', '..', 'data', 'bot_data.json');
     this.data = {
-      registrations: new Map(), // channelId -> Set(clubIds)
+      registrations: new Map(), // channelId -> Map(clubId -> {clubId, registeredBy, registeredAt})
       settings: new Map()       // channelId -> settings object
     };
   }
@@ -15,28 +15,43 @@ class DataManager {
   
   async load() {
     try {
-      // Créer le dossier data s'il n'existe pas
       const dataDir = path.dirname(this.dataFile);
       await fs.mkdir(dataDir, { recursive: true });
       
-      // Vérifier si le fichier existe
       try {
         await fs.access(this.dataFile);
       } catch (error) {
-        // Fichier n'existe pas, créer avec des données vides
         logger.info('📄 Création du fichier de données');
         await this.save();
         return;
       }
       
-      // Charger le fichier existant
       const fileContent = await fs.readFile(this.dataFile, 'utf8');
       const jsonData = JSON.parse(fileContent);
       
-      // Convertir les objets en Maps/Sets
+      // Convertir les objets en Maps
       if (jsonData.registrations) {
-        for (const [channelId, clubIds] of Object.entries(jsonData.registrations)) {
-          this.data.registrations.set(channelId, new Set(clubIds));
+        for (const [channelId, clubs] of Object.entries(jsonData.registrations)) {
+          const clubMap = new Map();
+          
+          // Support ancien format (array) et nouveau format (object)
+          if (Array.isArray(clubs)) {
+            // Ancien format: convertir en nouveau format
+            for (const clubId of clubs) {
+              clubMap.set(clubId.toString(), {
+                clubId: clubId.toString(),
+                registeredBy: null,
+                registeredAt: Date.now()
+              });
+            }
+          } else {
+            // Nouveau format
+            for (const [clubId, info] of Object.entries(clubs)) {
+              clubMap.set(clubId, info);
+            }
+          }
+          
+          this.data.registrations.set(channelId, clubMap);
         }
       }
       
@@ -53,21 +68,22 @@ class DataManager {
       
     } catch (error) {
       logger.error('❌ Erreur chargement données:', error);
-      // Continuer avec des données vides
     }
   }
   
   async save() {
     try {
-      // Convertir Maps/Sets en objets pour JSON
       const jsonData = {
         registrations: {},
         settings: {},
         lastSaved: new Date().toISOString()
       };
       
-      for (const [channelId, clubSet] of this.data.registrations.entries()) {
-        jsonData.registrations[channelId] = Array.from(clubSet);
+      for (const [channelId, clubMap] of this.data.registrations.entries()) {
+        jsonData.registrations[channelId] = {};
+        for (const [clubId, info] of clubMap.entries()) {
+          jsonData.registrations[channelId][clubId] = info;
+        }
       }
       
       for (const [channelId, settings] of this.data.settings.entries()) {
@@ -85,17 +101,22 @@ class DataManager {
 
   // =================== GESTION DES INSCRIPTIONS ===================
   
-  registerTeam(channelId, clubId) {
+  registerTeam(channelId, clubId, userId = null) {
     const clubIdStr = clubId.toString();
     
     if (!this.data.registrations.has(channelId)) {
-      this.data.registrations.set(channelId, new Set());
+      this.data.registrations.set(channelId, new Map());
     }
     
     const channelClubs = this.data.registrations.get(channelId);
-    channelClubs.add(clubIdStr);
     
-    logger.info(`➕ Club ${clubId} inscrit dans le canal ${channelId}`);
+    channelClubs.set(clubIdStr, {
+      clubId: clubIdStr,
+      registeredBy: userId,
+      registeredAt: Date.now()
+    });
+    
+    logger.info(`➕ Club ${clubId} inscrit dans le canal ${channelId} par ${userId || 'inconnu'}`);
     return true;
   }
   
@@ -109,7 +130,6 @@ class DataManager {
     const channelClubs = this.data.registrations.get(channelId);
     const removed = channelClubs.delete(clubIdStr);
     
-    // Supprimer le canal s'il n'y a plus de clubs
     if (channelClubs.size === 0) {
       this.data.registrations.delete(channelId);
     }
@@ -129,13 +149,22 @@ class DataManager {
   
   getChannelClubs(channelId) {
     const channelClubs = this.data.registrations.get(channelId);
-    return channelClubs ? Array.from(channelClubs) : [];
+    return channelClubs ? Array.from(channelClubs.keys()) : [];
+  }
+  
+  getClubRegistrationInfo(channelId, clubId) {
+    const clubIdStr = clubId.toString();
+    const channelClubs = this.data.registrations.get(channelId);
+    
+    if (!channelClubs) return null;
+    
+    return channelClubs.get(clubIdStr) || null;
   }
   
   getAllRegisteredClubs() {
     const allClubs = new Set();
-    for (const clubSet of this.data.registrations.values()) {
-      for (const clubId of clubSet) {
+    for (const clubMap of this.data.registrations.values()) {
+      for (const clubId of clubMap.keys()) {
         allClubs.add(clubId);
       }
     }
@@ -146,8 +175,8 @@ class DataManager {
     const clubIdStr = clubId.toString();
     const channels = [];
     
-    for (const [channelId, clubSet] of this.data.registrations.entries()) {
-      if (clubSet.has(clubIdStr)) {
+    for (const [channelId, clubMap] of this.data.registrations.entries()) {
+      if (clubMap.has(clubIdStr)) {
         channels.push(channelId);
       }
     }
@@ -179,8 +208,8 @@ class DataManager {
     const totalClubs = this.getAllRegisteredClubs().length;
     
     let totalRegistrations = 0;
-    for (const clubSet of this.data.registrations.values()) {
-      totalRegistrations += clubSet.size;
+    for (const clubMap of this.data.registrations.values()) {
+      totalRegistrations += clubMap.size;
     }
     
     return {
@@ -191,11 +220,11 @@ class DataManager {
     };
   }
   
-  // Debug: Afficher toutes les inscriptions
   debugRegistrations() {
     logger.debug('=== INSCRIPTIONS DEBUG ===');
-    for (const [channelId, clubSet] of this.data.registrations.entries()) {
-      logger.debug(`Canal ${channelId}: [${Array.from(clubSet).join(', ')}]`);
+    for (const [channelId, clubMap] of this.data.registrations.entries()) {
+      const clubs = Array.from(clubMap.keys());
+      logger.debug(`Canal ${channelId}: [${clubs.join(', ')}]`);
     }
     logger.debug('=== FIN DEBUG ===');
   }
