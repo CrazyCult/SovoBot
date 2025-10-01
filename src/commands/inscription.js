@@ -23,7 +23,6 @@ module.exports = {
 
     const clubId = args[0];
     
-    // Vérifier que l'ID est un nombre
     if (isNaN(clubId)) {
       const embed = new EmbedBuilder()
         .setColor('#FF6B6B')
@@ -40,7 +39,6 @@ module.exports = {
 
     const channelId = message.channel.id;
     
-    // Vérifier si déjà inscrit
     if (dataManager.isTeamRegistered(channelId, clubId)) {
       const embed = new EmbedBuilder()
         .setColor('#FFA500')
@@ -56,18 +54,16 @@ module.exports = {
     }
 
     try {
-      // Vérifier que le club existe via l'API
       const clubData = await apiClient.getClubDetails(clubId);
       
-      // Inscrire le club
-      dataManager.registerTeam(channelId, clubId);
+      // Inscrire le club avec l'ID de l'utilisateur
+      dataManager.registerTeam(channelId, clubId, message.author.id);
       await dataManager.save();
       
-      // Créer l'embed de confirmation
       const embed = new EmbedBuilder()
         .setColor('#4CAF50')
         .setTitle('✅ Inscription réussie !')
-        .setDescription(`**${clubData.display_name}** est maintenant inscrit dans ce salon.`)
+        .setDescription(`**${clubData.display_name}** est maintenant inscrit dans ce salon par <@${message.author.id}>.`)
         .addFields(
           {
             name: '🏟️ Club',
@@ -98,13 +94,17 @@ module.exports = {
             name: '👥 Fans',
             value: clubData.fans_current ? clubData.fans_current.toLocaleString() : 'Inconnu',
             inline: true
+          },
+          {
+            name: '🔔 Notifications',
+            value: 'Vous recevrez des mentions (@vous) pour:\n• Rappels de composition (6h/3h/1h avant)\n• Résultats de matchs\n• Enchères du club',
+            inline: false
           }
         )
         .setFooter({ 
-          text: `Vous recevrez les notifications des matchs dans ce salon • ${new Date().toLocaleDateString('fr-FR')}` 
+          text: `Inscrit par ${message.author.username} • ${new Date().toLocaleDateString('fr-FR')}` 
         });
 
-      // Ajouter une photo de profil si disponible
       if (clubData.profile_pic && clubData.profile_pic !== 'https://downloads.soccerverse.com/default_profile.jpg') {
         embed.setThumbnail(clubData.profile_pic);
       }
