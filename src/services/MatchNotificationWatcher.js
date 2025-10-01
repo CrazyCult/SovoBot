@@ -99,8 +99,6 @@ class MatchNotificationWatcher {
         return;
       }
       
-      const embed = await this.createMatchNotificationEmbed(clubId, match, hoursBeforeDeadline, deadlineTime);
-      
       for (const channelId of channelsForClub) {
         try {
           const channel = this.client.channels.cache.get(channelId);
@@ -108,6 +106,12 @@ class MatchNotificationWatcher {
             logger.warn(`Canal ${channelId} introuvable pour notification match`);
             continue;
           }
+          
+          // Récupérer qui a inscrit ce club
+          const registrationInfo = this.dataManager.getClubRegistrationInfo(channelId, clubId);
+          const registeredBy = registrationInfo?.registeredBy;
+          
+          const embed = await this.createMatchNotificationEmbed(clubId, match, hoursBeforeDeadline, deadlineTime, registeredBy);
           
           await channel.send({ embeds: [embed] });
           
@@ -123,7 +127,7 @@ class MatchNotificationWatcher {
     }
   }
 
-  async createMatchNotificationEmbed(clubId, match, hoursBeforeDeadline, deadlineTime) {
+  async createMatchNotificationEmbed(clubId, match, hoursBeforeDeadline, deadlineTime, registeredBy = null) {
     const clubName = this.apiClient.getClubName(clubId);
     const matchTime = new Date(match.date * 1000);
     const now = new Date();
@@ -149,7 +153,9 @@ class MatchNotificationWatcher {
       .setColor(colors[hoursBeforeDeadline] || '#FFA500')
       .setTitle(`${urgencyEmojis[hoursBeforeDeadline]} Rappel Composition d'Équipe`)
       .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
-      .setDescription(`**${clubName}** a un match dans ${Math.round((matchTime.getTime() - now.getTime()) / (1000 * 60 * 60))}h !`)
+      .setDescription(
+        `${registeredBy ? `<@${registeredBy}> ` : ''}**${clubName}** a un match dans ${Math.round((matchTime.getTime() - now.getTime()) / (1000 * 60 * 60))}h !`
+      )
       .addFields(
         {
           name: '⚽ Match à venir',
