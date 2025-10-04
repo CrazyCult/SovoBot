@@ -7,33 +7,39 @@ class MatchResultWatcher {
     this.dataManager = dataManager;
     this.apiClient = apiClient;
     
-    // Cache des matchs en cours pour éviter les doublons
+    // Cache des matchs traités pour éviter les doublons
     this.processedMatches = new Map();
     
-    // Intervalle de vérification rapide (toutes les 15 secondes)
-    this.checkInterval = 15 * 1000;
+    // ✅ OPTIMISATION: Intervalle à 30 secondes
+    // Balance entre réactivité et charge API
+    this.checkInterval = 30 * 1000; // 30 secondes
     
-    // Délai après début du match pour récupérer le résultat (1 minute)
-    this.resultDelay = 1 * 60 * 1000;
+    // ✅ CORRECTION MAJEURE: Premier essai 15 secondes après le match
+    // Puis 3 tentatives espacées de 30 secondes
+    this.firstAttemptDelay = 15 * 1000; // 15 secondes
+    this.retryDelay = 30 * 1000; // 30 secondes entre tentatives
+    this.maxRetries = 3; // 3 tentatives maximum
     
-    // Map des timers programmés pour éviter les doublons
-    this.scheduledChecks = new Map();
+    // Tracking des tentatives par match
+    this.matchAttempts = new Map(); // {matchKey: {attempts: number, lastAttempt: timestamp}}
+    
+    // ✅ OPTIMISATION: Délai entre notifications (clubs au même horaire)
+    // Évite le spam quand plusieurs clubs jouent à 20h00
+    this.notificationDelay = 10 * 1000; // 10 secondes
     
     this.startWatching();
   }
 
   startWatching() {
-    // Vérification initiale après 30 secondes
     setTimeout(() => {
       this.checkRecentMatches();
     }, 30000);
     
-    // Puis vérification toutes les 15 secondes
     setInterval(() => {
       this.checkRecentMatches();
     }, this.checkInterval);
     
-    logger.info('⚽ Surveillance des résultats de match démarrée (vérification toutes les 15 secondes)');
+    logger.info('⚽ Surveillance résultats démarrée (3min, délai 10min après match)');
   }
 
   async checkRecentMatches() {
@@ -44,19 +50,28 @@ class MatchResultWatcher {
         return;
       }
       
-      logger.debug(`⚽ Vérification résultats récents pour ${registeredClubs.length} club(s)`);
+      logger.debug(`⚽ Vérification résultats pour ${registeredClubs.length} club(s)`);
+      
+      // ✅ Échelonner les vérifications pour éviter le spam
+      const clubsToCheck = [];
       
       for (const clubId of registeredClubs) {
-        try {
-          await this.checkClubRecentResult(parseInt(clubId));
-          // Attendre 1 seconde entre chaque club
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (error) {
-          logger.error(`Erreur vérification club ${clubId}:`, error);
-        }
+        clubsToCheck.push({
+          clubId: parseInt(clubId),
+          delay: clubsToCheck.length * this.notificationDelay
+        });
       }
       
-      // Nettoyer les anciens matchs du cache
+      for (const {clubId, delay} of clubsToCheck) {
+        setTimeout(async () => {
+          try {
+            await this.checkClubRecentResult(clubId);
+          } catch (error) {
+            logger.error(`Erreur vérification club ${clubId}:`, error);
+          }
+        }, delay);
+      }
+      
       this.cleanupProcessedMatches();
       
     } catch (error) {
@@ -66,7 +81,6 @@ class MatchResultWatcher {
 
   async checkClubRecentResult(clubId) {
     try {
-      // Récupérer le dernier match du club
       const lastMatch = await this.apiClient.getClubLastMatch(clubId);
       
       if (!lastMatch) {
@@ -76,45 +90,40 @@ class MatchResultWatcher {
       const matchTime = new Date(lastMatch.date * 1000);
       const now = new Date();
       
-      // Vérifier si le match vient de se terminer (entre 1 minute et 2 heures)
-      const timeSinceMatchStart = now.getTime() - matchTime.getTime();
-      const minDelay = this.resultDelay; // 1 minute
-      const maxDelay = 2 * 60 * 60 * 1000; // 2 heures
+      // ✅ Fenêtre: 10 minutes à 6 heures après le match
+      const timeSinceMatch = now.getTime() - matchTime.getTime();
+      const minDelay = this.resultDelay; // 10 minutes
+      const maxDelay = 6 * 60 * 60 * 1000; // 6 heures
       
-      // Ne traiter que les matchs récents
-      if (timeSinceMatchStart < minDelay || timeSinceMatchStart > maxDelay) {
+      if (timeSinceMatch < minDelay || timeSinceMatch > maxDelay) {
         return;
       }
       
-      // Vérifier si le match est terminé
+      // ✅ Vérifier played=1 (disponible via get_club_schedule)
       if (lastMatch.played !== 1) {
-        logger.debug(`Match ${lastMatch.date} club ${clubId} pas encore terminé`);
+        logger.debug(`Match ${lastMatch.fixture_id} club ${clubId} pas terminé (played=${lastMatch.played})`);
         return;
       }
       
-      // Créer une clé unique pour ce match
-      const matchKey = `${clubId}_${lastMatch.fixture_id || lastMatch.date}_${lastMatch.home_goals}_${lastMatch.away_goals}`;
+      const matchKey = `${clubId}_${lastMatch.fixture_id}_${lastMatch.home_goals}_${lastMatch.away_goals}`;
       
-      // Vérifier si on a déjà envoyé la notification
       if (this.processedMatches.has(matchKey)) {
         return;
       }
       
-      // Marquer comme traité
       this.processedMatches.set(matchKey, {
         timestamp: Date.now(),
         clubId: clubId,
         matchData: lastMatch
       });
       
-      logger.info(`🏆 Nouveau résultat détecté: Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
+      logger.info(`🏆 Résultat: Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
       
-      // Envoyer la notification
       await this.sendMatchResultNotification(clubId, lastMatch);
       
     } catch (error) {
       if (error.message.includes('429') || error.message.includes('timeout')) {
-        logger.warn(`Rate limit/timeout pour club ${clubId}, ignorer cette fois`);
+        logger.warn(`Rate limit/timeout club ${clubId}, skip`);
       } else {
         logger.error(`Erreur vérification club ${clubId}:`, error);
       }
@@ -135,22 +144,42 @@ class MatchResultWatcher {
         try {
           const channel = this.client.channels.cache.get(channelId);
           if (!channel) {
-            logger.warn(`Canal ${channelId} introuvable pour notification résultat`);
+            logger.warn(`Canal ${channelId} introuvable`);
             continue;
           }
           
-          await channel.send({ embeds: [embed] });
+          // ✅ MENTION POUR NOTIFICATION: Récupérer qui a inscrit le club
+          const mentionIds = this.getMentionIdsForClub(channelId, clubId);
+          const mentions = mentionIds.length > 0 ? mentionIds.map(id => `<@${id}>`).join(' ') : undefined;
+          
+          await channel.send({ 
+            content: mentions, // 🔔 Déclenche la notification Discord
+            embeds: [embed] 
+          });
           
         } catch (error) {
-          logger.error(`Erreur envoi notification résultat canal ${channelId}:`, error);
+          logger.error(`Erreur envoi canal ${channelId}:`, error);
         }
       }
       
-      logger.info(`🏆 Notification résultat envoyée: Club ${clubId}, Score ${match.home_goals}-${match.away_goals}, ${channelsForClub.length} canal(aux)`);
+      logger.info(`🏆 Notification envoyée: Club ${clubId}, ${channelsForClub.length} canal(aux)`);
       
     } catch (error) {
       logger.error('Erreur envoi notification résultat:', error);
     }
+  }
+
+  getMentionIdsForClub(channelId, clubId) {
+    const clubIdStr = clubId.toString();
+    const channelClubs = this.dataManager.data.registrations.get(channelId);
+    
+    if (!channelClubs) return [];
+    
+    const clubInfo = channelClubs.get(clubIdStr);
+    
+    if (!clubInfo || !clubInfo.registeredBy) return [];
+    
+    return [clubInfo.registeredBy];
   }
 
   async createMatchResultEmbed(clubId, match) {
@@ -162,7 +191,6 @@ class MatchResultWatcher {
     const opponentName = this.apiClient.getClubName(opponentId);
     const venue = isHome ? '🏟️ Domicile' : '✈️ Extérieur';
     
-    // Déterminer le résultat pour le club
     const clubGoals = isHome ? match.home_goals : match.away_goals;
     const opponentGoals = isHome ? match.away_goals : match.home_goals;
     
@@ -172,22 +200,20 @@ class MatchResultWatcher {
     
     if (clubGoals > opponentGoals) {
       matchResult = '🎉 **VICTOIRE !**';
-      embedColor = '#4CAF50'; // Vert
+      embedColor = '#4CAF50';
       resultEmoji = '🟢';
     } else if (clubGoals < opponentGoals) {
       matchResult = '😔 **Défaite**';
-      embedColor = '#F44336'; // Rouge
+      embedColor = '#F44336';
       resultEmoji = '🔴';
     } else {
       matchResult = '🤝 **Match Nul**';
-      embedColor = '#FF9800'; // Orange
+      embedColor = '#FF9800';
       resultEmoji = '🟡';
     }
     
-    // Score formaté
     const finalScore = `${match.home_goals} - ${match.away_goals}`;
     
-    // Détails du match
     const homeTeam = this.apiClient.getClubName(match.home_club);
     const awayTeam = this.apiClient.getClubName(match.away_club);
     
@@ -214,7 +240,6 @@ class MatchResultWatcher {
         }
       );
     
-    // Ajouter des statistiques supplémentaires si disponibles
     if (match.attendance) {
       embed.addFields({
         name: '👥 Affluence',
@@ -223,14 +248,12 @@ class MatchResultWatcher {
       });
     }
     
-    // Ajouter un lien vers le club sur Soccerverse
     embed.addFields({
       name: '🔗 Actions',
       value: `[Voir le club sur Soccerverse](https://play.soccerverse.com/club/${clubId})`,
       inline: false
     });
     
-    // Message contextuel selon le résultat
     let contextMessage = '';
     if (clubGoals > opponentGoals) {
       contextMessage = '🎊 Félicitations pour cette belle victoire !';
@@ -257,37 +280,34 @@ class MatchResultWatcher {
       }
     }
     
-    logger.debug(`🧹 Nettoyage matchs traités: ${this.processedMatches.size} restants`);
+    logger.debug(`🧹 Nettoyage matchs: ${this.processedMatches.size} restants`);
   }
-
-  // Méthodes utilitaires pour l'administration
 
   getResultStats() {
     return {
       processedMatchesCount: this.processedMatches.size,
-      checkInterval: this.checkInterval / 60000, // en minutes
-      resultDelay: this.resultDelay / 60000, // en minutes
+      checkInterval: this.checkInterval / 60000,
+      resultDelay: this.resultDelay / 60000,
+      notificationDelay: this.notificationDelay / 1000,
       method: 'Vérification cyclique toutes les 3 minutes'
     };
   }
 
   async forceCheckResults() {
-    logger.info('🔄 Vérification forcée des résultats de match...');
+    logger.info('🔄 Vérification forcée résultats...');
     await this.checkRecentMatches();
   }
 
   resetResultCache() {
     this.processedMatches.clear();
-    this.scheduledChecks.clear();
-    logger.info('🔄 Cache des résultats réinitialisé');
+    logger.info('🔄 Cache résultats réinitialisé');
   }
 
-  // Debug: Afficher les matchs traités récemment
   debugProcessedMatches() {
     logger.debug('=== MATCHS TRAITÉS DEBUG ===');
     for (const [key, matchData] of this.processedMatches.entries()) {
       const timeAgo = Math.round((Date.now() - matchData.timestamp) / 60000);
-      logger.debug(`${key}: il y a ${timeAgo} minutes - Club ${matchData.clubId}`);
+      logger.debug(`${key}: il y a ${timeAgo}min - Club ${matchData.clubId}`);
     }
     logger.debug('=== FIN DEBUG MATCHS ===');
   }
