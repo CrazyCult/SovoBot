@@ -7,7 +7,9 @@ class MatchResultWatcher {
     this.dataManager = dataManager;
     this.apiClient = apiClient;
     
-    this.processedMatches = new Map();
+    // 🔥 NOUVEAU: Charger les matchs déjà traités depuis le fichier
+    this.processedMatches = this.loadProcessedMatches();
+    
     this.checkInterval = 30 * 1000;
     this.firstAttemptDelay = 15 * 1000;
     this.retryDelay = 30 * 1000;
@@ -16,6 +18,54 @@ class MatchResultWatcher {
     this.notificationDelay = 10 * 1000;
     
     this.startWatching();
+  }
+
+  // 🔥 NOUVELLE MÉTHODE: Charger les matchs déjà traités
+  loadProcessedMatches() {
+    try {
+      const settings = this.dataManager.data.settings.get('_global');
+      if (settings && settings.processedMatches) {
+        const map = new Map();
+        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+        
+        // Ne charger que les matchs des dernières 24h
+        for (const [key, data] of Object.entries(settings.processedMatches)) {
+          if (data.timestamp > oneDayAgo) {
+            map.set(key, data);
+          }
+        }
+        
+        logger.info(`📦 ${map.size} match(s) déjà traité(s) chargé(s) depuis le cache`);
+        return map;
+      }
+    } catch (error) {
+      logger.warn('⚠️ Impossible de charger le cache des matchs:', error.message);
+    }
+    
+    return new Map();
+  }
+
+  // 🔥 NOUVELLE MÉTHODE: Sauvegarder les matchs traités
+  async saveProcessedMatches() {
+    try {
+      const settings = this.dataManager.data.settings.get('_global') || {};
+      
+      // Convertir Map en objet pour JSON
+      const processedMatchesObj = {};
+      for (const [key, data] of this.processedMatches.entries()) {
+        processedMatchesObj[key] = data;
+      }
+      
+      settings.processedMatches = processedMatchesObj;
+      this.dataManager.data.settings.set('_global', settings);
+      
+      // Déclencher la sauvegarde
+      await this.dataManager.save();
+      
+      logger.debug(`💾 Cache matchs sauvegardé: ${this.processedMatches.size} entrée(s)`);
+    } catch (error) {
+      logger.error('❌ Erreur lors de la sauvegarde du cache:', error);
+    }
   }
 
   startWatching() {
@@ -150,6 +200,9 @@ class MatchResultWatcher {
     });
     
     this.matchAttempts.delete(matchKey);
+    
+    // 🔥 NOUVEAU: Sauvegarder immédiatement après traitement
+    await this.saveProcessedMatches();
     
     logger.info(`🏆 Résultat notifié: Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
     
@@ -428,11 +481,21 @@ class MatchResultWatcher {
 
   cleanupProcessedMatches() {
     const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    let cleanedCount = 0;
     
     for (const [key, matchData] of this.processedMatches.entries()) {
       if (matchData.timestamp < oneDayAgo) {
         this.processedMatches.delete(key);
+        cleanedCount++;
       }
+    }
+    
+    // Sauvegarder après nettoyage si des matchs ont été supprimés
+    if (cleanedCount > 0) {
+      this.saveProcessedMatches().catch(err => {
+        logger.error('Erreur sauvegarde après nettoyage:', err);
+      });
+      logger.info(`🧹 Cache nettoyé: ${cleanedCount} match(s) ancien(s) supprimé(s)`);
     }
     
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
@@ -466,6 +529,12 @@ class MatchResultWatcher {
   resetResultCache() {
     this.processedMatches.clear();
     this.matchAttempts.clear();
+    
+    // Supprimer aussi du fichier
+    this.saveProcessedMatches().catch(err => {
+      logger.error('Erreur sauvegarde après reset:', err);
+    });
+    
     logger.info('🔄 Cache résultats et tentatives réinitialisés');
   }
 
