@@ -48,6 +48,8 @@ class MatchResultWatcher {
   // 🔥 NOUVELLE MÉTHODE: Sauvegarder les matchs traités
   async saveProcessedMatches() {
     try {
+      logger.info(`💾 DEBUT Sauvegarde cache: ${this.processedMatches.size} match(s)`);
+      
       const settings = this.dataManager.data.settings.get('_global') || {};
       
       // Convertir Map en objet pour JSON
@@ -62,6 +64,7 @@ class MatchResultWatcher {
       // Déclencher la sauvegarde
       await this.dataManager.save();
       
+      logger.info(`💾 FIN Sauvegarde cache réussie: ${this.processedMatches.size} match(s)`);
       logger.debug(`💾 Cache matchs sauvegardé: ${this.processedMatches.size} entrée(s)`);
     } catch (error) {
       logger.error('❌ Erreur lors de la sauvegarde du cache:', error);
@@ -192,6 +195,8 @@ class MatchResultWatcher {
     if (this.processedMatches.has(matchKey)) {
       return;
     }
+    
+    logger.info(`🏆 AJOUT match au cache: ${matchKey} (Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals})`);
     
     this.processedMatches.set(matchKey, {
       timestamp: Date.now(),
