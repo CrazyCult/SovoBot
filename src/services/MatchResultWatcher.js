@@ -202,15 +202,33 @@ class MatchResultWatcher {
         fixture_id: parseInt(fixtureId)
       });
       
-      if (result && result.data) {
-        return result.data;
+      // 🔥 FIX: get_fixture retourne un ARRAY, pas un objet !
+      let matchDetails = null;
+      
+      if (Array.isArray(result)) {
+        // Si c'est directement un array
+        matchDetails = result[0];
+      } else if (result && result.data && Array.isArray(result.data)) {
+        // Si c'est dans result.data
+        matchDetails = result.data[0];
+      } else if (result && result.data) {
+        // Fallback: objet direct
+        matchDetails = result.data;
       } else if (result) {
-        return result;
+        // Fallback: objet à la racine
+        matchDetails = result;
       }
       
-      return null;
+      if (!matchDetails) {
+        logger.warn(`Aucun détail trouvé pour le match ${fixtureId}`);
+        return null;
+      }
+      
+      logger.debug(`✅ Stats match ${fixtureId}: possession=${matchDetails.home_possession}/${matchDetails.away_possession}, tirs=${matchDetails.home_shots}/${matchDetails.away_shots}`);
+      
+      return matchDetails;
     } catch (error) {
-      logger.warn(`Impossible de récupérer les détails du match ${fixtureId}:`, error);
+      logger.warn(`Impossible de récupérer les détails du match ${fixtureId}:`, error.message);
       return null;
     }
   }
@@ -281,9 +299,16 @@ class MatchResultWatcher {
       inline: false
     });
 
-    // Stats détaillées si disponibles
-    if (matchDetails) {
-      const homeStats = isHome ? {
+    // 🔥 FIX: Vérifier que matchDetails existe ET qu'il a des stats
+    const hasStats = matchDetails && (
+      matchDetails.home_possession !== undefined ||
+      matchDetails.home_shots !== undefined ||
+      matchDetails.home_corners !== undefined
+    );
+
+    if (hasStats) {
+      // Extraire les stats selon le point de vue du club
+      const clubStats = isHome ? {
         possession: matchDetails.home_possession,
         shots: matchDetails.home_shots,
         shotsOnTarget: matchDetails.home_shots_on_target,
@@ -295,7 +320,7 @@ class MatchResultWatcher {
         corners: matchDetails.away_corners
       };
       
-      const awayStats = isHome ? {
+      const opponentStats = isHome ? {
         possession: matchDetails.away_possession,
         shots: matchDetails.away_shots,
         shotsOnTarget: matchDetails.away_shots_on_target,
@@ -310,9 +335,9 @@ class MatchResultWatcher {
       // Stats de votre club
       let clubStatsText = `**${clubName}**\n`;
       clubStatsText += `⚽ **Buts:** ${clubGoals}\n`;
-      clubStatsText += `📊 **Possession:** ${homeStats.possession}%\n`;
-      clubStatsText += `🎯 **Tirs:** ${homeStats.shots} (${homeStats.shotsOnTarget} cadrés)\n`;
-      clubStatsText += `🚩 **Corners:** ${homeStats.corners}`;
+      clubStatsText += `📊 **Possession:** ${clubStats.possession || 'N/A'}%\n`;
+      clubStatsText += `🎯 **Tirs:** ${clubStats.shots || 0} (${clubStats.shotsOnTarget || 0} cadrés)\n`;
+      clubStatsText += `🚩 **Corners:** ${clubStats.corners || 0}`;
       
       embed.addFields({
         name: '📊 Vos Statistiques',
@@ -323,9 +348,9 @@ class MatchResultWatcher {
       // Stats adversaire
       let opponentStatsText = `**${opponentName}**\n`;
       opponentStatsText += `⚽ **Buts:** ${opponentGoals}\n`;
-      opponentStatsText += `📊 **Possession:** ${awayStats.possession}%\n`;
-      opponentStatsText += `🎯 **Tirs:** ${awayStats.shots} (${awayStats.shotsOnTarget} cadrés)\n`;
-      opponentStatsText += `🚩 **Corners:** ${awayStats.corners}`;
+      opponentStatsText += `📊 **Possession:** ${opponentStats.possession || 'N/A'}%\n`;
+      opponentStatsText += `🎯 **Tirs:** ${opponentStats.shots || 0} (${opponentStats.shotsOnTarget || 0} cadrés)\n`;
+      opponentStatsText += `🚩 **Corners:** ${opponentStats.corners || 0}`;
       
       embed.addFields({
         name: '🆚 Adversaire',
@@ -342,6 +367,15 @@ class MatchResultWatcher {
           inline: false
         });
       }
+
+      // Affluence
+      if (matchDetails.attendance) {
+        embed.addFields({
+          name: '👥 Affluence',
+          value: `${matchDetails.attendance.toLocaleString()} spectateurs`,
+          inline: true
+        });
+      }
     } else {
       // Fallback si pas de stats détaillées
       embed.addFields(
@@ -356,16 +390,15 @@ class MatchResultWatcher {
           inline: true
         }
       );
-    }
 
-    // Affluence
-    if (match.attendance || (matchDetails && matchDetails.attendance)) {
-      const attendance = match.attendance || matchDetails.attendance;
-      embed.addFields({
-        name: '👥 Affluence',
-        value: `${attendance.toLocaleString()} spectateurs`,
-        inline: true
-      });
+      // Affluence du match de base
+      if (match.attendance) {
+        embed.addFields({
+          name: '👥 Affluence',
+          value: `${match.attendance.toLocaleString()} spectateurs`,
+          inline: true
+        });
+      }
     }
 
     // Lien
