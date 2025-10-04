@@ -8,13 +8,16 @@ class MatchNotificationWatcher {
     this.apiClient = apiClient;
     
     // Cache des notifications envoyées (pour éviter les doublons)
-    this.sentNotifications = new Set();
+    this.sentNotifications = new Map();
     
-    // Intervalle de vérification (5 minutes)
-    this.checkInterval = 5 * 60 * 1000;
+    // Intervalle de vérification (30 minutes)
+    this.checkInterval = 30 * 60 * 1000;
     
-    // Délai avant match pour envoyer la notification (30 minutes)
-    this.notificationWindow = 30 * 60 * 1000;
+    // Délais avant le match pour les notifications (en minutes)
+    this.notificationTimes = [360, 180, 60]; // 6h, 3h, 1h
+    
+    // Deadline = 2h avant le match
+    this.deadlineBeforeMatch = 120; // minutes
     
     // Statistiques
     this.stats = {
@@ -32,12 +35,12 @@ class MatchNotificationWatcher {
       this.checkAllUpcomingMatches();
     }, 60000);
     
-    // Puis vérification toutes les 5 minutes
+    // Puis vérification toutes les 30 minutes
     setInterval(() => {
       this.checkAllUpcomingMatches();
     }, this.checkInterval);
     
-    logger.info('⚽ Service de notifications de match démarré (vérification toutes les 5 minutes)');
+    logger.info('⚽ Service de notifications de match démarré (vérification toutes les 30 minutes)');
   }
 
   async checkAllUpcomingMatches() {
@@ -55,10 +58,17 @@ class MatchNotificationWatcher {
         try {
           await this.checkClubUpcomingMatch(clubId, channels);
           this.stats.matchesChecked++;
+          
+          // Attendre 2 secondes entre chaque club
+          await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (error) {
           logger.error(`Erreur vérification match club ${clubId}:`, error);
         }
       }
+      
+      // Nettoyer les vieilles notifications
+      this.cleanupOldNotifications();
+      
     } catch (error) {
       logger.error('Erreur vérification globale des matchs:', error);
     }
@@ -67,234 +77,186 @@ class MatchNotificationWatcher {
   async checkClubUpcomingMatch(clubId, channels) {
     try {
       // Récupérer le prochain match du club
-      const matches = await this.apiClient.getClubMatches(clubId);
-      const upcomingMatch = matches.find(m => new Date(m.scheduledAt) > new Date());
+      const nextMatch = await this.apiClient.getClubNextMatch(clubId);
       
-      if (!upcomingMatch) {
+      if (!nextMatch) {
+        logger.debug(`Pas de prochain match pour le club ${clubId}`);
         return;
       }
 
-      const matchTime = new Date(upcomingMatch.scheduledAt);
+      const matchTime = new Date(nextMatch.date * 1000);
       const now = new Date();
-      const timeUntilMatch = matchTime - now;
+      const minutesUntilMatch = Math.floor((matchTime - now) / (60 * 1000));
 
-      // Vérifier si le match est dans la fenêtre de notification (30 minutes avant)
-      if (timeUntilMatch > 0 && timeUntilMatch <= this.notificationWindow) {
-        const notificationKey = `${clubId}_${upcomingMatch.id}_lineup`;
+      // La deadline est 2h avant le match
+      const deadlineTime = new Date(matchTime.getTime() - (this.deadlineBeforeMatch * 60 * 1000));
+      const minutesUntilDeadline = Math.floor((deadlineTime - now) / (60 * 1000));
+
+      logger.debug(`Club ${clubId}: Match dans ${minutesUntilMatch}min, deadline dans ${minutesUntilDeadline}min`);
+
+      // Vérifier si on doit envoyer une notification
+      for (const notifyMinutes of this.notificationTimes) {
+        const notificationKey = `${clubId}_${nextMatch.date}_${notifyMinutes}`;
         
-        // Vérifier si la notification a déjà été envoyée
-        if (!this.sentNotifications.has(notificationKey)) {
-          // Vérifier si la composition est disponible
-          const lineup = await this.apiClient.getMatchLineup(upcomingMatch.id);
+        // Vérifier si on est dans la fenêtre de notification
+        const minWindow = notifyMinutes - 15; // -15 minutes de marge
+        const maxWindow = notifyMinutes + 15; // +15 minutes de marge
+        
+        const isInTimeWindow = minutesUntilDeadline >= minWindow && minutesUntilDeadline <= maxWindow;
+        
+        if (isInTimeWindow && !this.sentNotifications.has(notificationKey)) {
+          await this.sendMatchReminderNotification(clubId, nextMatch, notifyMinutes, channels);
+          this.sentNotifications.set(notificationKey, Date.now());
+          this.stats.notificationsSent++;
           
-          if (lineup && lineup.homeTeam && lineup.awayTeam) {
-            await this.sendLineupNotification(clubId, upcomingMatch, lineup, channels);
-            this.sentNotifications.add(notificationKey);
-            this.stats.notificationsSent++;
-          } else {
-            // Si pas de composition, envoyer au moins une notif de match imminent
-            await this.sendMatchImminentNotification(clubId, upcomingMatch, channels);
-            this.sentNotifications.add(notificationKey);
-            this.stats.notificationsSent++;
-          }
+          logger.info(`⚽ Notification envoyée: Club ${clubId}, ${notifyMinutes}min avant deadline`);
         }
       }
+      
     } catch (error) {
       logger.error(`Erreur récupération match club ${clubId}:`, error);
     }
   }
 
-  async sendLineupNotification(clubId, match, lineup, channels) {
+  async sendMatchReminderNotification(clubId, match, minutesBeforeDeadline, channels) {
     try {
-      const club = await this.apiClient.getClub(clubId);
-      const isHomeTeam = match.homeClubId === clubId;
-      const teamLineup = isHomeTeam ? lineup.homeTeam : lineup.awayTeam;
-      const opponentLineup = isHomeTeam ? lineup.awayTeam : lineup.homeTeam;
+      const clubName = this.apiClient.getClubName(clubId);
+      const matchTime = new Date(match.date * 1000);
+      const deadlineTime = new Date(matchTime.getTime() - (this.deadlineBeforeMatch * 60 * 1000));
       
-      // Récupérer les infos de l'adversaire
-      const opponentId = isHomeTeam ? match.awayClubId : match.homeClubId;
-      const opponent = await this.apiClient.getClub(opponentId);
-
-      // Créer l'embed avec la composition
+      const isHome = match.home_club == clubId;
+      const opponentName = isHome ? match.away_club_name : match.home_club_name;
+      const venue = isHome ? '🏟️ Domicile' : '✈️ Extérieur';
+      
+      // Déterminer l'urgence
+      let urgencyColor = '#4CAF50';
+      let urgencyEmoji = '⏰';
+      let urgencyText = 'Rappel';
+      
+      if (minutesBeforeDeadline <= 60) {
+        urgencyColor = '#FF6B6B';
+        urgencyEmoji = '🚨';
+        urgencyText = 'URGENT';
+      } else if (minutesBeforeDeadline <= 180) {
+        urgencyColor = '#FF9800';
+        urgencyEmoji = '⚠️';
+        urgencyText = 'Attention';
+      }
+      
       const embed = new EmbedBuilder()
-        .setTitle(`⚽ Composition d'équipe annoncée !`)
-        .setDescription(`Le match va bientôt commencer`)
+        .setColor(urgencyColor)
+        .setTitle(`${urgencyEmoji} ${urgencyText} - Composition d'équipe`)
+        .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
+        .setDescription(`**${clubName}** a un match qui approche !`)
         .addFields(
-          { 
-            name: `${club.name} ${isHomeTeam ? '(Domicile)' : '(Extérieur)'}`, 
-            value: this.formatLineup(teamLineup), 
-            inline: false 
-          },
-          { 
-            name: `${opponent.name} ${isHomeTeam ? '(Extérieur)' : '(Domicile)'}`, 
-            value: this.formatLineup(opponentLineup), 
-            inline: false 
-          },
           {
-            name: '⏰ Coup d\'envoi',
-            value: `<t:${Math.floor(new Date(match.scheduledAt).getTime() / 1000)}:R>`,
+            name: '🆚 Adversaire',
+            value: opponentName,
             inline: true
           },
           {
-            name: '🏟️ Lieu',
-            value: isHomeTeam ? 'Domicile' : 'Extérieur',
+            name: '📍 Lieu',
+            value: venue,
+            inline: true
+          },
+          {
+            name: '🏆 Compétition',
+            value: match.competition_type || '⚽ Match',
+            inline: true
+          },
+          {
+            name: '⏰ Deadline Composition',
+            value: `<t:${Math.floor(deadlineTime.getTime() / 1000)}:R>`,
+            inline: true
+          },
+          {
+            name: '⚽ Début du Match',
+            value: `<t:${Math.floor(matchTime.getTime() / 1000)}:F>`,
+            inline: true
+          },
+          {
+            name: '🏟️ Stade',
+            value: match.stadium_name || 'Stade inconnu',
             inline: true
           }
         )
-        .setColor('#4CAF50')
+        .setFooter({ 
+          text: `${minutesBeforeDeadline >= 60 ? Math.floor(minutesBeforeDeadline / 60) + 'h' : minutesBeforeDeadline + 'min'} avant la deadline • Soccerverse Bot v3.0` 
+        })
         .setTimestamp();
 
-      if (club.logoUrl) {
-        embed.setThumbnail(club.logoUrl);
+      // Ajouter un message contextuel selon l'urgence
+      let contextMessage = '';
+      if (minutesBeforeDeadline <= 60) {
+        contextMessage = '🚨 **DERNIÈRE HEURE !** N\'oubliez pas de définir votre composition !';
+      } else if (minutesBeforeDeadline <= 180) {
+        contextMessage = '⚠️ Plus que quelques heures pour préparer votre équipe.';
+      } else {
+        contextMessage = '💡 Pensez à préparer votre composition pour ce match.';
       }
+      
+      embed.addFields({
+        name: '📝 Action requise',
+        value: contextMessage + `\n\n[Définir la composition](https://play.soccerverse.com/club/${clubId})`,
+        inline: false
+      });
 
       // Envoyer dans tous les canaux concernés
       for (const channelId of channels) {
         try {
           const channel = this.client.channels.cache.get(channelId);
-          if (!channel) continue;
+          if (!channel) {
+            logger.warn(`Canal ${channelId} introuvable pour notification match`);
+            continue;
+          }
 
-          // ✅ VRAIE NOTIFICATION avec mentions des utilisateurs inscrits
+          // Récupérer les utilisateurs à mentionner
           const mentionIds = this.getMentionIdsForClub(channelId, clubId);
-          const mentions = mentionIds.map(id => `<@${id}>`).join(' ');
+          const mentions = mentionIds.length > 0 ? mentionIds.map(id => `<@${id}>`).join(' ') : undefined;
 
           await channel.send({
-            content: mentions || undefined, // 🔔 Mentions qui déclenchent les notifications
+            content: mentions, // 🔔 Mentions qui déclenchent les notifications
             embeds: [embed]
           });
 
-          logger.info(`⚽ Notification composition envoyée pour ${club.name} dans le canal ${channelId}`);
+          logger.info(`⚽ Notification composition envoyée: ${clubName} (${minutesBeforeDeadline}min) → Canal ${channelId}`);
+          
         } catch (error) {
           logger.error(`Erreur envoi notification dans canal ${channelId}:`, error);
         }
       }
+      
     } catch (error) {
       logger.error('Erreur envoi notification composition:', error);
     }
   }
 
-  async sendMatchImminentNotification(clubId, match, channels) {
-    try {
-      const club = await this.apiClient.getClub(clubId);
-      const isHomeTeam = match.homeClubId === clubId;
-      
-      // Récupérer les infos de l'adversaire
-      const opponentId = isHomeTeam ? match.awayClubId : match.homeClubId;
-      const opponent = await this.apiClient.getClub(opponentId);
-
-      const embed = new EmbedBuilder()
-        .setTitle('⚽ Match imminent !')
-        .setDescription(`Le match va bientôt commencer`)
-        .addFields(
-          { 
-            name: `${club.name}`, 
-            value: isHomeTeam ? '🏠 Domicile' : '✈️ Extérieur',
-            inline: true 
-          },
-          { 
-            name: 'VS', 
-            value: '⚔️',
-            inline: true 
-          },
-          { 
-            name: `${opponent.name}`, 
-            value: isHomeTeam ? '✈️ Extérieur' : '🏠 Domicile',
-            inline: true 
-          },
-          {
-            name: '⏰ Coup d\'envoi',
-            value: `<t:${Math.floor(new Date(match.scheduledAt).getTime() / 1000)}:R>`,
-            inline: false
-          }
-        )
-        .setColor('#FFA500')
-        .setTimestamp();
-
-      if (club.logoUrl) {
-        embed.setThumbnail(club.logoUrl);
-      }
-
-      // Envoyer dans tous les canaux concernés
-      for (const channelId of channels) {
-        try {
-          const channel = this.client.channels.cache.get(channelId);
-          if (!channel) continue;
-
-          // ✅ VRAIE NOTIFICATION avec mentions
-          const mentionIds = this.getMentionIdsForClub(channelId, clubId);
-          const mentions = mentionIds.map(id => `<@${id}>`).join(' ');
-
-          await channel.send({
-            content: mentions || undefined, // 🔔 Notifications
-            embeds: [embed]
-          });
-
-          logger.info(`⚽ Notification match imminent envoyée pour ${club.name} dans le canal ${channelId}`);
-        } catch (error) {
-          logger.error(`Erreur envoi notification dans canal ${channelId}:`, error);
-        }
-      }
-    } catch (error) {
-      logger.error('Erreur envoi notification match imminent:', error);
-    }
-  }
-
-  formatLineup(teamLineup) {
-    if (!teamLineup || !teamLineup.starters) {
-      return 'Composition non disponible';
-    }
-
-    // Formation
-    let lineup = '';
-    
-    if (teamLineup.formation) {
-      lineup += `**Formation:** ${teamLineup.formation}\n\n`;
-    }
-
-    // Titulaires
-    const starters = teamLineup.starters
-      .map(p => `${p.firstName} ${p.lastName} (${p.position})`)
-      .join('\n');
-    
-    lineup += `**Titulaires:**\n${starters}`;
-
-    // Remplaçants
-    if (teamLineup.substitutes && teamLineup.substitutes.length > 0) {
-      const subs = teamLineup.substitutes
-        .map(p => `${p.firstName} ${p.lastName} (${p.position})`)
-        .join('\n');
-      lineup += `\n\n**Remplaçants:**\n${subs}`;
-    }
-    
-    return lineup || 'Aucune composition disponible';
-  }
-
   getMentionIdsForClub(channelId, clubId) {
-    // Récupérer les utilisateurs Discord qui ont inscrit ce club dans ce canal
-    const channelData = this.dataManager.data.channels[channelId];
-    if (!channelData || !channelData.clubs) return [];
-
-    const mentionIds = [];
-    for (const [userId, userClubs] of Object.entries(channelData.clubs)) {
-      if (userClubs.includes(clubId)) {
-        mentionIds.push(userId);
-      }
-    }
-    return mentionIds;
+    // Récupérer l'utilisateur qui a inscrit ce club dans ce canal
+    const clubIdStr = clubId.toString();
+    const channelClubs = this.dataManager.data.registrations.get(channelId);
+    
+    if (!channelClubs) return [];
+    
+    const clubInfo = channelClubs.get(clubIdStr);
+    
+    if (!clubInfo || !clubInfo.registeredBy) return [];
+    
+    return [clubInfo.registeredBy];
   }
 
   getAllRegisteredClubs() {
     const clubMap = new Map();
     
-    for (const [channelId, channelData] of Object.entries(this.dataManager.data.channels)) {
-      if (channelData.clubs) {
-        for (const clubIds of Object.values(channelData.clubs)) {
-          for (const clubId of clubIds) {
-            if (!clubMap.has(clubId)) {
-              clubMap.set(clubId, []);
-            }
-            clubMap.get(clubId).push(channelId);
+    // CORRECTION: Utiliser registrations au lieu de channels
+    for (const [channelId, clubsMap] of this.dataManager.data.registrations.entries()) {
+      if (clubsMap && clubsMap.size > 0) {
+        for (const [clubId, clubInfo] of clubsMap.entries()) {
+          const clubIdNum = parseInt(clubId);
+          if (!clubMap.has(clubIdNum)) {
+            clubMap.set(clubIdNum, []);
           }
+          clubMap.get(clubIdNum).push(channelId);
         }
       }
     }
@@ -318,8 +280,14 @@ class MatchNotificationWatcher {
   }
 
   // Obtenir les statistiques
-  getStats() {
-    return { ...this.stats };
+  getNotificationStats() {
+    return {
+      ...this.stats,
+      checkInterval: this.checkInterval / 60000, // en minutes
+      notificationTimes: this.notificationTimes.map(m => `${m >= 60 ? (m/60) + 'h' : m + 'min'}`).join(', '),
+      deadlineBeforeMatch: `${this.deadlineBeforeMatch}min`,
+      sentNotificationsCount: this.sentNotifications.size
+    };
   }
 
   // Nettoyer les notifications anciennes du cache
@@ -328,20 +296,35 @@ class MatchNotificationWatcher {
     const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
     let cleanedCount = 0;
 
-    for (const notifKey of this.sentNotifications) {
-      // Format: clubId_matchId_lineup
-      const parts = notifKey.split('_');
-      if (parts.length >= 3) {
-        // Vérifier si la notification est ancienne (logique simplifiée)
-        // Dans un vrai cas, il faudrait stocker les timestamps
+    for (const [notifKey, timestamp] of this.sentNotifications.entries()) {
+      if (timestamp < sevenDaysAgo) {
+        this.sentNotifications.delete(notifKey);
         cleanedCount++;
       }
     }
 
-    if (cleanedCount > 100) {
-      this.sentNotifications.clear();
+    if (cleanedCount > 0) {
       logger.info(`🧹 Cache notifications nettoyé: ${cleanedCount} entrées supprimées`);
     }
+  }
+
+  // Debug
+  debugNotificationWatching() {
+    logger.debug('=== NOTIFICATIONS MATCH DEBUG ===');
+    const allClubs = this.getAllRegisteredClubs();
+    
+    if (allClubs.length === 0) {
+      logger.debug('Aucun club surveillé');
+    } else {
+      for (const { clubId, channels } of allClubs) {
+        const clubName = this.apiClient.getClubName(clubId);
+        logger.debug(`Club ${clubId} (${clubName}): ${channels.length} canal(aux)`);
+      }
+    }
+    
+    logger.debug(`Notifications envoyées (cache): ${this.sentNotifications.size}`);
+    logger.debug(`Statistiques: ${JSON.stringify(this.stats, null, 2)}`);
+    logger.debug('=== FIN DEBUG NOTIFICATIONS ===');
   }
 }
 
