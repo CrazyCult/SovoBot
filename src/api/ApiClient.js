@@ -52,7 +52,6 @@ class ApiClient {
   
   getLeagueName(leagueId) {
     const name = this.mappingManager.getLeagueName(leagueId);
-    // Debug temporaire
     if (name === `Ligue #${leagueId}`) {
       logger.debug(`🔍 Ligue ${leagueId} introuvable. Mappings disponibles: ${this.mappingManager.leagueNames.size}`);
     }
@@ -173,8 +172,6 @@ class ApiClient {
     }
     
     const club = data.items[0];
-    
-    // Enrichir avec le nom du mapping manager
     club.display_name = this.getClubName(club.club_id);
     
     return club;
@@ -182,7 +179,6 @@ class ApiClient {
 
   async getCurrentSeason() {
     try {
-      // Méthode 1: Essayer get_current_season
       const currentSeason = await this.makeRpcRequest('get_current_season', {});
       if (currentSeason && currentSeason.season_id) {
         logger.debug(`✅ Saison courante trouvée: ${currentSeason.season_id}`);
@@ -193,7 +189,6 @@ class ApiClient {
     }
 
     try {
-      // Méthode 2: Essayer get_season_info
       const seasonInfo = await this.makeRpcRequest('get_season_info', {});
       if (seasonInfo && seasonInfo.current_season) {
         logger.debug(`✅ Saison courante trouvée via season_info: ${seasonInfo.current_season}`);
@@ -204,14 +199,12 @@ class ApiClient {
     }
 
     try {
-      // Méthode 3: Analyser les matchs récents d'un club populaire pour déduire la saison
       const recentMatches = await this.makeRpcRequest('get_club_schedule', {
-        club_id: 1013, // Club populaire
-        season_id: 2   // Tester saison 2
+        club_id: 1013,
+        season_id: 2
       });
       
       if (recentMatches && Array.isArray(recentMatches) && recentMatches.length > 0) {
-        // Vérifier s'il y a des matchs récents (moins de 6 mois)
         const now = Date.now() / 1000;
         const sixMonthsAgo = now - (6 * 30 * 24 * 60 * 60);
         const recentMatch = recentMatches.find(match => match.date > sixMonthsAgo);
@@ -226,7 +219,6 @@ class ApiClient {
     }
 
     try {
-      // Méthode 4: Fallback vers saison 1
       const season1Matches = await this.makeRpcRequest('get_club_schedule', {
         club_id: 1013,
         season_id: 1
@@ -240,7 +232,6 @@ class ApiClient {
       logger.debug(`⚠️ Fallback saison 1 échoué: ${error.message}`);
     }
 
-    // Dernière chance: assumer saison 2 (plus récente)
     logger.warn('Impossible de déterminer la saison courante, utilisation de la saison 2');
     return 2;
   }
@@ -250,29 +241,54 @@ class ApiClient {
       throw new Error('ID de club invalide');
     }
     
-    // Utiliser get_clubs_last_fixture pour récupérer le dernier match
-    const result = await this.makeRpcRequest('get_clubs_last_fixture', {
-      club_id: parseInt(clubId)
-    });
-    
-    // CORRECTION: Les données sont dans result.data, pas directement dans result
-    if (!result || !result.data) {
-      throw new Error(`Aucun dernier match trouvé pour le club ${clubId}`);
+    // ✅ CORRECTION MAJEURE: Utiliser get_club_schedule au lieu de get_clubs_last_fixture
+    // Raison: get_clubs_last_fixture NE RETOURNE PAS le flag "played"
+    // Ce flag est ESSENTIEL pour détecter si un match est terminé
+    try {
+      for (const seasonId of [2, 1]) {
+        const result = await this.makeRpcRequest('get_club_schedule', {
+          club_id: parseInt(clubId),
+          season_id: seasonId
+        });
+        
+        let matches = [];
+        if (result && result.data && Array.isArray(result.data)) {
+          matches = result.data;
+        } else if (result && Array.isArray(result)) {
+          matches = result;
+        }
+        
+        if (matches.length === 0) continue;
+        
+        const now = Math.floor(Date.now() / 1000);
+        const playedMatches = matches
+          .filter(match => match.played === 1 && match.date < now)
+          .sort((a, b) => b.date - a.date);
+        
+        if (playedMatches.length > 0) {
+          const lastMatch = playedMatches[0];
+          
+          const enrichedMatch = {
+            ...lastMatch,
+            home_club_name: this.getClubName(lastMatch.home_club),
+            away_club_name: this.getClubName(lastMatch.away_club),
+            stadium_name: this.getStadiumName(lastMatch.stadium_id),
+            country_name: this.formatCountryName(lastMatch.country_id),
+            competition_type: this.getCompetitionType(lastMatch.comp_type)
+          };
+          
+          logger.debug(`✅ Dernier match (S${seasonId}, played=${lastMatch.played}): ${enrichedMatch.home_club_name} ${lastMatch.home_goals}-${lastMatch.away_goals} ${enrichedMatch.away_club_name}`);
+          
+          return enrichedMatch;
+        }
+      }
+      
+      throw new Error(`Aucun match joué trouvé pour le club ${clubId}`);
+      
+    } catch (error) {
+      logger.error(`❌ Erreur getClubLastMatch ${clubId}:`, error);
+      throw error;
     }
-    
-    const matchData = result.data;
-    
-    // Enrichir avec les noms
-    const enrichedMatch = {
-      ...matchData,
-      home_club_name: this.getClubName(matchData.home_club),
-      away_club_name: this.getClubName(matchData.away_club),
-      stadium_name: this.getStadiumName(matchData.stadium_id),
-      country_name: this.formatCountryName(matchData.country_id),
-      competition_type: this.getCompetitionType(matchData.comp_type)
-    };
-    
-    return enrichedMatch;
   }
 
   async getClubNextMatch(clubId) {
@@ -280,19 +296,16 @@ class ApiClient {
       throw new Error('ID de club invalide');
     }
     
-    // Utiliser get_clubs_next_fixture pour récupérer le prochain match
     const result = await this.makeRpcRequest('get_clubs_next_fixture', {
       club_id: parseInt(clubId)
     });
     
-    // CORRECTION: Les données sont dans result.data, pas directement dans result
     if (!result || !result.data) {
       throw new Error(`Aucun prochain match trouvé pour le club ${clubId}`);
     }
     
     const matchData = result.data;
     
-    // Enrichir avec les noms
     const enrichedMatch = {
       ...matchData,
       home_club_name: this.getClubName(matchData.home_club),
@@ -310,24 +323,19 @@ class ApiClient {
       throw new Error('ID de club invalide');
     }
     
-    // Récupérer automatiquement la saison courante
     const currentSeason = await this.getCurrentSeason();
     
-    // Utiliser l'API RPC comme dans votre code Python
     const result = await this.makeRpcRequest('get_club_schedule', {
       club_id: parseInt(clubId),
       season_id: currentSeason
     });
     
-    // Les méthodes RPC retournent directement le result, pas un objet avec une propriété data
     if (!result || !Array.isArray(result)) {
       throw new Error(`Aucun match trouvé pour le club ${clubId} en saison ${currentSeason}`);
     }
     
-    // Trier par date (plus récent en premier)
     const matches = result.sort((a, b) => b.date - a.date);
     
-    // Enrichir chaque match avec les noms
     const enrichedMatches = matches.map(match => ({
       ...match,
       home_club_name: this.getClubName(match.home_club),
@@ -341,13 +349,11 @@ class ApiClient {
     return enrichedMatches.slice(0, limit);
   }
 
-  // Méthode alternative pour compatibility avec l'ancienne commande matchs
   async getClubMatches(clubId, limit = 20) {
     return await this.getClubSchedule(clubId, limit);
   }
 
   async searchClubs(searchTerm, limit = 10) {
-    // Utiliser la recherche intégrée du mapping manager
     const searchResults = this.mappingManager.searchClubs(searchTerm, limit);
     const results = [];
     
@@ -356,7 +362,6 @@ class ApiClient {
         const clubData = await this.getClubDetails(clubInfo.id);
         results.push(clubData);
       } catch (error) {
-        // Ignorer les clubs introuvables dans l'API
         continue;
       }
     }
@@ -371,16 +376,14 @@ class ApiClient {
       throw new Error('ID de ligue invalide');
     }
 
-    // Essayer d'abord avec un paramètre pour récupérer toutes les équipes
     let data;
     try {
       data = await this.makeRequest('/league_tables', {
         league_id: parseInt(leagueId),
-        limit: 100, // Essayer de récupérer jusqu'à 100 équipes
-        all: true   // Paramètre pour récupérer toutes les équipes
+        limit: 100,
+        all: true
       });
     } catch (error) {
-      // Fallback vers la requête normale si les paramètres ne sont pas supportés
       data = await this.makeRequest('/league_tables', { league_id: parseInt(leagueId) });
     }
     
@@ -388,12 +391,10 @@ class ApiClient {
       throw new Error(`Classement introuvable pour la ligue ${leagueId}`);
     }
 
-    console.log(`📊 Classement ligue ${leagueId}: ${data.length} équipes récupérées`);
+    logger.debug(`📊 Classement ligue ${leagueId}: ${data.length} équipes`);
 
-    // Trier par position actuelle
     const sortedTable = data.sort((a, b) => a.new_position - b.new_position);
     
-    // Enrichir avec les noms des clubs
     const enrichedTable = sortedTable.map(team => ({
       ...team,
       club_name: this.getClubName(team.club_id)
@@ -407,8 +408,6 @@ class ApiClient {
   formatMoney(amount) {
     if (!amount || amount === 0) return '0$';
     
-    // L'API renvoie les montants qu'il faut diviser par 10 000
-    // et arrondir vers le haut
     const dollars = Math.ceil(amount / 10000);
     
     if (dollars >= 1000000000) {
@@ -510,7 +509,6 @@ class ApiClient {
   formatForm(form) {
     if (!form) return 'Aucune';
     
-    // Inverser la chaîne pour avoir le plus ancien à gauche
     return form.split('').map(char => {
       switch (char) {
         case 'W': return '🟢';
@@ -536,7 +534,6 @@ class ApiClient {
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
     const diffDays = Math.floor(diffHours / 24);
     
-    // Match futur
     if (diffMs < 0) {
       const futureDiffMs = Math.abs(diffMs);
       const futureDiffHours = Math.floor(futureDiffMs / (1000 * 60 * 60));
@@ -551,7 +548,6 @@ class ApiClient {
       }
     }
     
-    // Match passé
     if (diffHours < 1) {
       return 'Il y a moins d\'1h';
     } else if (diffHours < 24) {
@@ -571,11 +567,11 @@ class ApiClient {
     let result = '';
     if (match.played === 1) {
       if (clubGoals > opponentGoals) {
-        result = '🟢 V'; // Victoire
+        result = '🟢 V';
       } else if (clubGoals < opponentGoals) {
-        result = '🔴 D'; // Défaite
+        result = '🔴 D';
       } else {
-        result = '🟡 N'; // Nul
+        result = '🟡 N';
       }
     } else {
       result = '⏳ À venir';
