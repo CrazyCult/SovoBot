@@ -261,7 +261,7 @@ class EncheresWatcher {
         .setColor('#4CAF50')
         .setTitle('🏁 Enchère Terminée !')
         .setThumbnail(`https://elrincondeldt.com/sv/photos/players/${auction.player_id}.png`)
-        .setDescription(`${startedBy ? `<@${startedBy}> ` : ''}L'enchère pour **${playerName}** est terminée.`)
+        .setDescription(`L'enchère pour **${playerName}** est terminée.`)
         .addFields(
           {
             name: '👤 Joueur',
@@ -289,7 +289,13 @@ class EncheresWatcher {
         })
         .setTimestamp();
 
-      await channel.send({ embeds: [embed] });
+      // ✅ VRAIE NOTIFICATION - Mention dans content
+      const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
+
+      await channel.send({ 
+        content: mentionContent, // 🔔 Badge rouge !
+        embeds: [embed] 
+      });
       
       logger.info(`🏁 Notification fin enchère envoyée: ${playerName} → ${winnerName}`);
       
@@ -392,7 +398,7 @@ class EncheresWatcher {
         .setColor('#FF4444')
         .setTitle('🚨 Enchère Dépassée !')
         .setThumbnail(`https://elrincondeldt.com/sv/photos/players/${auction.player_id}.png`)
-        .setDescription(`${startedBy ? `<@${startedBy}> ` : ''}Votre enchère pour **${playerName}** a été dépassée !`)
+        .setDescription(`Votre enchère pour **${playerName}** a été dépassée !`)
         .addFields(
           {
             name: '👤 Joueur',
@@ -430,7 +436,14 @@ class EncheresWatcher {
         })
         .setTimestamp();
 
-      await channel.send({ embeds: [embed] });
+      // ✅ VRAIE NOTIFICATION - Mention dans content
+      const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
+
+      await channel.send({ 
+        content: mentionContent, // 🔔 Badge rouge !
+        embeds: [embed] 
+      });
+      
       this.stats.notificationsSent++;
       
       logger.info(`🚨 Notification dépassement envoyée: ${playerName} pour ${clubName}`);
@@ -469,7 +482,7 @@ class EncheresWatcher {
         .setColor(urgencyColor)
         .setTitle(`${urgencyEmoji} Enchère se termine dans ${minutesLeft} minute${minutesLeft > 1 ? 's' : ''} !`)
         .setThumbnail(`https://elrincondeldt.com/sv/photos/players/${auction.player_id}.png`)
-        .setDescription(`${startedBy ? `<@${startedBy}> ` : ''}**${playerName}** - Dernière chance d'enchérir !`)
+        .setDescription(`**${playerName}** - Dernière chance d'enchérir !`)
         .addFields(
           {
             name: '👤 Joueur',
@@ -507,7 +520,14 @@ class EncheresWatcher {
         })
         .setTimestamp();
 
-      await channel.send({ embeds: [embed] });
+      // ✅ VRAIE NOTIFICATION - Mention dans content
+      const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
+
+      await channel.send({ 
+        content: mentionContent, // 🔔 Badge rouge !
+        embeds: [embed] 
+      });
+      
       this.stats.notificationsSent++;
       
       logger.info(`⏰ Notification fin imminente envoyée: ${playerName} (${minutesLeft}min)`);
