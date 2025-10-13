@@ -7,7 +7,7 @@ class MatchResultWatcher {
     this.dataManager = dataManager;
     this.apiClient = apiClient;
     
-    // 🔥 NOUVEAU: Charger les matchs déjà traités depuis le fichier
+    // 🔥 CORRECTION: Charger depuis le bon emplacement
     this.processedMatches = this.loadProcessedMatches();
     
     this.checkInterval = 30 * 1000;
@@ -17,25 +17,31 @@ class MatchResultWatcher {
     this.matchAttempts = new Map();
     this.notificationDelay = 10 * 1000;
     
+    // 🔥 NOUVEAU: Sauvegarder toutes les 5 minutes
+    setInterval(() => {
+      this.saveProcessedMatches();
+    }, 5 * 60 * 1000);
+    
     this.startWatching();
   }
 
-  // 🔥 NOUVELLE MÉTHODE: Charger les matchs déjà traités
+  // 🔥 CORRECTION MAJEURE: Meilleure persistance
   loadProcessedMatches() {
     try {
-      const settings = this.dataManager.data.settings.get('_global');
+      const settings = this.dataManager.getChannelSettings('_global_results');
+      
       if (settings && settings.processedMatches) {
         const map = new Map();
-        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+        const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); // 🔥 7 jours au lieu de 1
         
-        // Ne charger que les matchs des dernières 24h
+        // Charger tous les matchs récents
         for (const [key, data] of Object.entries(settings.processedMatches)) {
-          if (data.timestamp > oneDayAgo) {
+          if (data.timestamp > sevenDaysAgo) {
             map.set(key, data);
           }
         }
         
-        logger.info(`📦 ${map.size} match(s) déjà traité(s) chargé(s) depuis le cache`);
+        logger.info(`📦 ${map.size} match(s) déjà traité(s) chargé(s) depuis le cache (7 derniers jours)`);
         return map;
       }
     } catch (error) {
@@ -45,26 +51,23 @@ class MatchResultWatcher {
     return new Map();
   }
 
-  // 🔥 NOUVELLE MÉTHODE: Sauvegarder les matchs traités
+  // 🔥 CORRECTION: Sauvegarder de manière robuste
   async saveProcessedMatches() {
     try {
-      logger.info(`💾 DEBUT Sauvegarde cache: ${this.processedMatches.size} match(s)`);
-      
-      const settings = this.dataManager.data.settings.get('_global') || {};
-      
       // Convertir Map en objet pour JSON
       const processedMatchesObj = {};
       for (const [key, data] of this.processedMatches.entries()) {
         processedMatchesObj[key] = data;
       }
       
-      settings.processedMatches = processedMatchesObj;
-      this.dataManager.data.settings.set('_global', settings);
+      // Sauvegarder dans un canal spécial pour les résultats
+      this.dataManager.setChannelSettings('_global_results', {
+        processedMatches: processedMatchesObj,
+        lastSaved: Date.now()
+      });
       
-      // Déclencher la sauvegarde
       await this.dataManager.save();
       
-      logger.info(`💾 FIN Sauvegarde cache réussie: ${this.processedMatches.size} match(s)`);
       logger.debug(`💾 Cache matchs sauvegardé: ${this.processedMatches.size} entrée(s)`);
     } catch (error) {
       logger.error('❌ Erreur lors de la sauvegarde du cache:', error);
@@ -127,6 +130,15 @@ class MatchResultWatcher {
         return;
       }
       
+      // 🔥 CORRECTION CRITIQUE: Générer une clé robuste
+      const matchKey = this.generateMatchKey(clubId, lastMatch);
+      
+      // 🔥 VÉRIFICATION IMMÉDIATE: Si déjà traité, STOP !
+      if (this.processedMatches.has(matchKey)) {
+        logger.debug(`✅ Match ${matchKey} déjà notifié, skip`);
+        return;
+      }
+      
       const matchTime = new Date(lastMatch.date * 1000);
       const now = new Date();
       const timeSinceMatch = now.getTime() - matchTime.getTime();
@@ -137,7 +149,6 @@ class MatchResultWatcher {
         return;
       }
       
-      const matchKey = `${clubId}_${lastMatch.fixture_id}`;
       const attemptData = this.matchAttempts.get(matchKey) || { attempts: 0, lastAttempt: 0 };
       
       if (attemptData.attempts >= this.maxRetries) {
@@ -173,13 +184,13 @@ class MatchResultWatcher {
         lastAttempt: Date.now()
       });
       
-      logger.debug(`Tentative ${attemptData.attempts + 1}/${this.maxRetries} pour match ${lastMatch.fixture_id} club ${clubId} (${Math.round(timeSinceMatch/1000)}s après match)`);
+      logger.debug(`Tentative ${attemptData.attempts + 1}/${this.maxRetries} pour match ${matchKey} (${Math.round(timeSinceMatch/1000)}s après match)`);
       
       if (lastMatch.played === 1) {
-        logger.info(`✅ Match terminé détecté à la tentative ${attemptData.attempts + 1}: Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
+        logger.info(`✅ Match terminé détecté à la tentative ${attemptData.attempts + 1}: ${matchKey}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
         await this.processMatchResult(clubId, lastMatch, matchKey);
       } else {
-        logger.debug(`❌ Match ${lastMatch.fixture_id} club ${clubId} pas encore terminé (played=${lastMatch.played}, tentative ${attemptData.attempts + 1}/${this.maxRetries})`);
+        logger.debug(`❌ Match ${matchKey} pas encore terminé (played=${lastMatch.played}, tentative ${attemptData.attempts + 1}/${this.maxRetries})`);
       }
       
     } catch (error) {
@@ -191,8 +202,27 @@ class MatchResultWatcher {
     }
   }
 
+  // 🔥 NOUVELLE MÉTHODE: Générer une clé unique et robuste
+  generateMatchKey(clubId, match) {
+    // Essayer plusieurs sources d'ID dans l'ordre de préférence
+    const matchId = match.fixture_id || match.match_id || match.id;
+    
+    if (matchId) {
+      return `${clubId}_${matchId}`;
+    }
+    
+    // Fallback: utiliser la date + équipes
+    const dateKey = Math.floor(match.date / 60); // Arrondir à la minute
+    const homeClub = match.home_club || 0;
+    const awayClub = match.away_club || 0;
+    
+    return `${clubId}_${dateKey}_${homeClub}_${awayClub}`;
+  }
+
   async processMatchResult(clubId, lastMatch, matchKey) {
+    // 🔥 DOUBLE VÉRIFICATION
     if (this.processedMatches.has(matchKey)) {
+      logger.warn(`⚠️ Match ${matchKey} déjà dans le cache, skip (double vérification)`);
       return;
     }
     
@@ -201,7 +231,13 @@ class MatchResultWatcher {
     this.processedMatches.set(matchKey, {
       timestamp: Date.now(),
       clubId: clubId,
-      matchData: lastMatch
+      matchData: {
+        date: lastMatch.date,
+        home_club: lastMatch.home_club,
+        away_club: lastMatch.away_club,
+        home_goals: lastMatch.home_goals,
+        away_goals: lastMatch.away_goals
+      }
     });
     
     this.matchAttempts.delete(matchKey);
@@ -223,7 +259,7 @@ class MatchResultWatcher {
       }
       
       // Récupérer les stats détaillées du match
-      const matchDetails = await this.getMatchDetails(match.fixture_id);
+      const matchDetails = await this.getMatchDetails(match.fixture_id || match.match_id || match.id);
       const embed = await this.createMatchResultEmbed(clubId, match, matchDetails);
       
       for (const channelId of channelsForClub) {
@@ -255,25 +291,25 @@ class MatchResultWatcher {
   }
 
   async getMatchDetails(fixtureId) {
+    if (!fixtureId) {
+      logger.warn('Aucun fixture_id fourni, skip détails');
+      return null;
+    }
+    
     try {
       const result = await this.apiClient.makeRpcRequest('get_fixture', {
         fixture_id: parseInt(fixtureId)
       });
       
-      // 🔥 FIX: get_fixture retourne un ARRAY, pas un objet !
       let matchDetails = null;
       
       if (Array.isArray(result)) {
-        // Si c'est directement un array
         matchDetails = result[0];
       } else if (result && result.data && Array.isArray(result.data)) {
-        // Si c'est dans result.data
         matchDetails = result.data[0];
       } else if (result && result.data) {
-        // Fallback: objet direct
         matchDetails = result.data;
       } else if (result) {
-        // Fallback: objet à la racine
         matchDetails = result;
       }
       
@@ -357,7 +393,6 @@ class MatchResultWatcher {
       inline: false
     });
 
-    // 🔥 FIX: Vérifier que matchDetails existe ET qu'il a des stats
     const hasStats = matchDetails && (
       matchDetails.home_possession !== undefined ||
       matchDetails.home_shots !== undefined ||
@@ -365,7 +400,6 @@ class MatchResultWatcher {
     );
 
     if (hasStats) {
-      // Extraire les stats selon le point de vue du club
       const clubStats = isHome ? {
         possession: matchDetails.home_possession,
         shots: matchDetails.home_shots,
@@ -390,7 +424,6 @@ class MatchResultWatcher {
         corners: matchDetails.home_corners
       };
 
-      // Stats de votre club
       let clubStatsText = `**${clubName}**\n`;
       clubStatsText += `⚽ **Buts:** ${clubGoals}\n`;
       clubStatsText += `📊 **Possession:** ${clubStats.possession || 'N/A'}%\n`;
@@ -403,7 +436,6 @@ class MatchResultWatcher {
         inline: true
       });
 
-      // Stats adversaire
       let opponentStatsText = `**${opponentName}**\n`;
       opponentStatsText += `⚽ **Buts:** ${opponentGoals}\n`;
       opponentStatsText += `📊 **Possession:** ${opponentStats.possession || 'N/A'}%\n`;
@@ -416,7 +448,6 @@ class MatchResultWatcher {
         inline: true
       });
 
-      // Homme du match
       if (matchDetails.man_of_match) {
         const motmName = this.apiClient.getPlayerName(matchDetails.man_of_match);
         embed.addFields({
@@ -426,7 +457,6 @@ class MatchResultWatcher {
         });
       }
 
-      // Affluence
       if (matchDetails.attendance) {
         embed.addFields({
           name: '👥 Affluence',
@@ -435,7 +465,6 @@ class MatchResultWatcher {
         });
       }
     } else {
-      // Fallback si pas de stats détaillées
       embed.addFields(
         {
           name: '📊 Performance',
@@ -449,7 +478,6 @@ class MatchResultWatcher {
         }
       );
 
-      // Affluence du match de base
       if (match.attendance) {
         embed.addFields({
           name: '👥 Affluence',
@@ -459,14 +487,12 @@ class MatchResultWatcher {
       }
     }
 
-    // Lien
     embed.addFields({
       name: '🔗 Actions',
       value: `[Voir le club sur Soccerverse](https://play.soccerverse.com/club/${clubId})`,
       inline: false
     });
 
-    // Message contextuel
     let contextMessage = '';
     if (clubGoals > opponentGoals) {
       contextMessage = '🎊 Félicitations pour cette belle victoire !';
@@ -485,22 +511,22 @@ class MatchResultWatcher {
   }
 
   cleanupProcessedMatches() {
-    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    // 🔥 CORRECTION: 7 jours au lieu de 24h
+    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
     let cleanedCount = 0;
     
     for (const [key, matchData] of this.processedMatches.entries()) {
-      if (matchData.timestamp < oneDayAgo) {
+      if (matchData.timestamp < sevenDaysAgo) {
         this.processedMatches.delete(key);
         cleanedCount++;
       }
     }
     
-    // Sauvegarder après nettoyage si des matchs ont été supprimés
     if (cleanedCount > 0) {
       this.saveProcessedMatches().catch(err => {
         logger.error('Erreur sauvegarde après nettoyage:', err);
       });
-      logger.info(`🧹 Cache nettoyé: ${cleanedCount} match(s) ancien(s) supprimé(s)`);
+      logger.info(`🧹 Cache nettoyé: ${cleanedCount} match(s) ancien(s) supprimé(s) (>7 jours)`);
     }
     
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
@@ -535,7 +561,6 @@ class MatchResultWatcher {
     this.processedMatches.clear();
     this.matchAttempts.clear();
     
-    // Supprimer aussi du fichier
     this.saveProcessedMatches().catch(err => {
       logger.error('Erreur sauvegarde après reset:', err);
     });
