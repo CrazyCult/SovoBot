@@ -64,3 +64,4 @@ Thumbs.db
 # Bot data
 data/
 debug_surveillance.js
+ecosystem.config.js
