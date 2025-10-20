@@ -56,7 +56,6 @@ module.exports = {
       
       try {
         const clubData = await apiClient.getClubDetails(clubId);
-        const isRegistered = true; // Par définition, il est inscrit
         
         const embed = new EmbedBuilder()
           .setColor('#4CAF50')
@@ -75,27 +74,17 @@ module.exports = {
             },
             {
               name: '💰 Finances',
-              value: `**Trésorerie:** ${apiClient.formatMoney(clubData.balance)}\n**Salaires totaux:** ${apiClient.formatMoney(clubData.total_wages)}\n**Salaire moyen:** ${apiClient.formatMoney(clubData.avg_wages)}\n**Valeur équipe:** ${apiClient.formatMoney(clubData.total_player_value)}`,
+              value: `**Trésorerie:** ${apiClient.formatMoney(clubData.balance)}\n**Salaires:** ${apiClient.formatMoney(clubData.total_wages)}\n**Valeur équipe:** ${apiClient.formatMoney(clubData.total_player_value)}`,
               inline: true
             },
             {
               name: '⚽ Statistiques',
-              value: `**Rating moyen:** ${clubData.avg_player_rating}\n**Top 21:** ${clubData.avg_player_rating_top21}\n**Tir:** ${clubData.avg_shooting}\n**Passe:** ${clubData.avg_passing}\n**Tacle:** ${clubData.avg_tackling}\n**Gardien:** ${clubData.gk_rating}`,
+              value: `**Rating moyen:** ${clubData.avg_player_rating}\n**Top 21:** ${clubData.avg_player_rating_top21}`,
               inline: true
             },
             {
-              name: '👥 Supporters & Infrastructure',
-              value: `**Supporters:** ${clubData.fans_current?.toLocaleString() || 'Inconnu'} ${apiClient.formatFansChange(clubData.fans_current, clubData.fans_start)}\n**Stade:** ${apiClient.getStadiumName(clubData.stadium_id)}\n**Capacité:** ${clubData.stadium_size_current?.toLocaleString() || 'Inconnu'} ${apiClient.formatCapacityChange(clubData.stadium_size_current, clubData.stadium_size_start)}`,
-              inline: true
-            },
-            {
-              name: '🏆 Compétition',
-              value: `**Ligue:** ${apiClient.getLeagueNameByCountryDivision(clubData.country_id, clubData.division)} (#${clubData.league_id})\n**Catégorie:** Division ${clubData.division + 1}`,
-              inline: true
-            },
-            {
-              name: '📅 Activité',
-              value: `**Dernière connexion:** ${apiClient.formatTimestamp(clubData.manager_last_active_unix)}\n**Transferts entrants:** ${clubData.transfers_in}\n**Transferts sortants:** ${clubData.transfers_out}`,
+              name: '👥 Supporters',
+              value: `**Fans:** ${clubData.fans_current?.toLocaleString() || 'Inconnu'}\n**Stade:** ${apiClient.getStadiumName(clubData.stadium_id)}\n**Capacité:** ${clubData.stadium_size_current?.toLocaleString() || 'Inconnu'}`,
               inline: true
             },
             {
@@ -105,33 +94,49 @@ module.exports = {
             }
           )
           .setFooter({ 
-            text: `${new Date().toLocaleDateString('fr-FR')}` 
+            text: `Club ID: ${clubId} • ${new Date().toLocaleDateString('fr-FR')}` 
           });
 
-        // CORRECTION: Utiliser l'image spécifique du club avec backticks pour l'interpolation
+        // Image du club
         const clubImageUrl = `https://elrincondeldt.com/sv/photos/teams/${clubId}.png`;
-        
-        // Essayer d'abord l'image spécifique du club, sinon fallback sur profile_pic
-        if (clubImageUrl) {
-          embed.setThumbnail(clubImageUrl);
-        } else if (clubData.profile_pic && clubData.profile_pic !== 'https://downloads.soccerverse.com/default_profile.jpg') {
-          embed.setThumbnail(clubData.profile_pic);
-        }
+        embed.setThumbnail(clubImageUrl);
 
         embeds.push(embed);
         
       } catch (error) {
+        // ✅ CORRECTION: Afficher un embed d'erreur propre au lieu de crash
+        logger.error(`Erreur récupération club ${clubId}:`, error);
+        
         const errorEmbed = new EmbedBuilder()
           .setColor('#FF6B6B')
           .setTitle(`🏟️ Club #${clubId} (${i + 1}/${registeredClubs.length})`)
           .setDescription('⚠️ **Données indisponibles**')
           .addFields({
             name: 'Erreur',
-            value: 'Impossible de récupérer les informations de ce club.'
+            value: `Impossible de récupérer les informations de ce club.\n\`\`\`${error.message}\`\`\``
+          })
+          .addFields({
+            name: '💡 Actions',
+            value: '• Vérifiez que le club existe toujours\n• Réessayez dans quelques instants\n• Utilisez `!desinscription ${clubId}` pour le retirer'
           });
         
         embeds.push(errorEmbed);
       }
+    }
+
+    // ✅ CORRECTION: Vérifier qu'on a des embeds avant d'envoyer
+    if (embeds.length === 0) {
+      const embed = new EmbedBuilder()
+        .setColor('#FF6B6B')
+        .setTitle('❌ Erreur')
+        .setDescription('Impossible de récupérer les informations des clubs inscrits.')
+        .addFields({
+          name: '💡 Solution',
+          value: 'Essayez de désinscrire et réinscrire vos clubs.'
+        });
+      
+      await message.reply({ embeds: [embed] });
+      return;
     }
 
     // Envoyer tous les embeds (Discord limite à 10 embeds par message)
@@ -151,7 +156,7 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor(isRegistered ? '#4CAF50' : '#2196F3')
         .setTitle(`🏟️ ${clubData.display_name}`)
-        .setDescription(isRegistered ? '✅ **Inscrit aux notifications**' : 'Non inscrit aux notifications')
+        .setDescription(isRegistered ? '✅ **Inscrit aux notifications**' : 'ℹ️ Informations du club')
         .addFields(
           {
             name: '🔗 Lien direct',
@@ -185,34 +190,28 @@ module.exports = {
           },
           {
             name: '📅 Activité',
-            value: `**Connexion:** ${apiClient.formatTimestamp(clubData.manager_last_active_unix)}\n**Transferts entrants:** ${clubData.transfers_in}\n**Transferts sortants:** ${clubData.transfers_out}`,
+            value: `**Dernière connexion:** ${apiClient.formatTimestamp(clubData.manager_last_active_unix)}\n**Transferts entrants:** ${clubData.transfers_in}\n**Transferts sortants:** ${clubData.transfers_out}`,
             inline: true
           },
           {
             name: '📈 Forme récente',
             value: apiClient.formatForm(clubData.form),
-            inline: true
+            inline: false
           }
         )
         .setFooter({ 
-          text: `${new Date().toLocaleDateString('fr-FR')}` 
+          text: `Club ID: ${clubId} • ${new Date().toLocaleDateString('fr-FR')}` 
         });
 
-      // CORRECTION: Utiliser l'image spécifique du club avec backticks pour l'interpolation
+      // Image du club
       const clubImageUrl = `https://elrincondeldt.com/sv/photos/teams/${clubId}.png`;
-      
-      // Essayer d'abord l'image spécifique du club, sinon fallback sur profile_pic
-      if (clubImageUrl) {
-        embed.setThumbnail(clubImageUrl);
-      } else if (clubData.profile_pic && clubData.profile_pic !== 'https://downloads.soccerverse.com/default_profile.jpg') {
-        embed.setThumbnail(clubData.profile_pic);
-      }
+      embed.setThumbnail(clubImageUrl);
 
-      // Ajouter des boutons d'action
-      const actionRow = new ActionRowBuilder();
+      // Boutons d'action
+      const row = new ActionRowBuilder();
       
       if (isRegistered) {
-        actionRow.addComponents(
+        row.addComponents(
           new ButtonBuilder()
             .setCustomId(`unregister_${clubId}`)
             .setLabel('Se désinscrire')
@@ -220,29 +219,44 @@ module.exports = {
             .setEmoji('🔕')
         );
       } else {
-        actionRow.addComponents(
+        row.addComponents(
           new ButtonBuilder()
             .setCustomId(`register_${clubId}`)
-            .setLabel('S\'inscrire aux notifications')
+            .setLabel('S\'inscrire')
             .setStyle(ButtonStyle.Success)
             .setEmoji('🔔')
         );
       }
+      
+      row.addComponents(
+        new ButtonBuilder()
+          .setLabel('Voir sur Soccerverse')
+          .setStyle(ButtonStyle.Link)
+          .setURL(`https://play.soccerverse.com/club/${clubId}`)
+          .setEmoji('🌐')
+      );
 
-      await message.reply({ 
-        embeds: [embed], 
-        components: [actionRow] 
-      });
+      await message.reply({ embeds: [embed], components: [row] });
       
     } catch (error) {
+      // ✅ CORRECTION: Meilleure gestion d'erreur avec plus de détails
+      logger.error(`Erreur showClubById pour club ${clubId}:`, error);
+      
       const embed = new EmbedBuilder()
         .setColor('#FF6B6B')
         .setTitle('❌ Club introuvable')
-        .setDescription(`Impossible de trouver le club avec l'ID **${clubId}**.`)
+        .setDescription(`Impossible de récupérer les informations du club **#${clubId}**.`)
+        .addFields({
+          name: '🔍 Détails de l\'erreur',
+          value: `\`\`\`${error.message}\`\`\``,
+          inline: false
+        })
         .addFields({
           name: '💡 Suggestions',
-          value: '• Vérifiez que l\'ID est correct\n• Utilisez `!club <nom>` pour rechercher par nom'
-        });
+          value: '• Vérifiez que l\'ID est correct\n• Le club existe peut-être plus\n• L\'API est peut-être temporairement indisponible\n• Utilisez `!club <nom>` pour rechercher par nom',
+          inline: false
+        })
+        .setFooter({ text: 'Réessayez dans quelques instants' });
       
       await message.reply({ embeds: [embed] });
     }
@@ -300,6 +314,8 @@ module.exports = {
       await message.reply({ embeds: [embed] });
       
     } catch (error) {
+      logger.error('Erreur searchClubByName:', error);
+      
       const embed = new EmbedBuilder()
         .setColor('#FF6B6B')
         .setTitle('❌ Erreur de recherche')
