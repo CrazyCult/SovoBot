@@ -7,12 +7,46 @@ class ApiClient {
     this.baseUrl = 'https://services.soccerverse.com/api';
     this.rpcUrl = 'https://gsppub.soccerverse.io/';
     
+    // ✅ IDENTIFICATION DU BOT
+    this.botIdentity = {
+      name: 'SoccerverseBot',
+      version: '3.0',
+      author: 'CrazyCult',
+      discord_id: '219439055107129354',
+      contact: 'discord:219439055107129354',
+      purpose: 'Discord notification bot for Soccerverse clubs'
+    };
+    
     // Cache simple en mémoire
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
     
+    // ✅ NOUVEAU: Cache spécifique pour la saison courante (24h)
+    this.currentSeasonCache = null;
+    this.currentSeasonCacheTime = null;
+    this.seasonCacheTimeout = 24 * 60 * 60 * 1000; // 24 heures
+    
     // Gestionnaire de mappings
     this.mappingManager = new MappingManager();
+    
+    logger.info(`🤖 Bot initialisé: ${this.getBotSignature()}`);
+  }
+
+  // =================== IDENTIFICATION ===================
+  
+  getBotSignature() {
+    return `${this.botIdentity.name}/${this.botIdentity.version} (${this.botIdentity.author})`;
+  }
+  
+  getBotHeaders() {
+    return {
+      'User-Agent': this.getBotSignature(),
+      'X-Bot-Name': this.botIdentity.name,
+      'X-Bot-Version': this.botIdentity.version,
+      'X-Bot-Author': this.botIdentity.author,
+      'X-Bot-Contact': this.botIdentity.contact,
+      'X-Bot-Purpose': this.botIdentity.purpose
+    };
   }
 
   // =================== CACHE ===================
@@ -103,7 +137,8 @@ class ApiClient {
         params,
         timeout: 10000,
         headers: {
-          'User-Agent': 'SoccerverseBot/3.0'
+          ...this.getBotHeaders(),
+          'Content-Type': 'application/json'
         }
       });
       
@@ -138,8 +173,8 @@ class ApiClient {
       const response = await axios.post(this.rpcUrl, payload, {
         timeout: 15000,
         headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'SoccerverseBot/3.0'
+          ...this.getBotHeaders(),
+          'Content-Type': 'application/json'
         }
       });
       
@@ -177,63 +212,63 @@ class ApiClient {
     return club;
   }
 
+  // ✅ MÉTHODE OPTIMISÉE: Cache de 24h pour éviter appels répétés
   async getCurrentSeason() {
+    // Vérifier le cache (valable 24h)
+    if (this.currentSeasonCache && this.currentSeasonCacheTime) {
+      const age = Date.now() - this.currentSeasonCacheTime;
+      if (age < this.seasonCacheTimeout) {
+        logger.debug(`✅ Saison courante (cache): ${this.currentSeasonCache}`);
+        return this.currentSeasonCache;
+      }
+    }
+
+    // ✅ PRIORITÉ 1: Utiliser get_current_season (endpoint officiel)
     try {
       const currentSeason = await this.makeRpcRequest('get_current_season', {});
       if (currentSeason && currentSeason.season_id) {
-        logger.debug(`✅ Saison courante trouvée: ${currentSeason.season_id}`);
+        this.currentSeasonCache = currentSeason.season_id;
+        this.currentSeasonCacheTime = Date.now();
+        logger.info(`✅ Saison courante détectée: ${currentSeason.season_id}`);
         return currentSeason.season_id;
       }
     } catch (error) {
-      logger.debug(`⚠️ get_current_season a échoué: ${error.message}`);
+      logger.debug(`⚠️ get_current_season non disponible: ${error.message}`);
     }
 
+    // ✅ PRIORITÉ 2: Utiliser get_season_info
     try {
       const seasonInfo = await this.makeRpcRequest('get_season_info', {});
       if (seasonInfo && seasonInfo.current_season) {
-        logger.debug(`✅ Saison courante trouvée via season_info: ${seasonInfo.current_season}`);
+        this.currentSeasonCache = seasonInfo.current_season;
+        this.currentSeasonCacheTime = Date.now();
+        logger.info(`✅ Saison courante détectée via season_info: ${seasonInfo.current_season}`);
         return seasonInfo.current_season;
       }
     } catch (error) {
-      logger.debug(`⚠️ get_season_info a échoué: ${error.message}`);
+      logger.debug(`⚠️ get_season_info non disponible: ${error.message}`);
     }
 
-    try {
-      const recentMatches = await this.makeRpcRequest('get_club_schedule', {
-        club_id: 1013,
-        season_id: 2
-      });
-      
-      if (recentMatches && Array.isArray(recentMatches) && recentMatches.length > 0) {
-        const now = Date.now() / 1000;
-        const sixMonthsAgo = now - (6 * 30 * 24 * 60 * 60);
-        const recentMatch = recentMatches.find(match => match.date > sixMonthsAgo);
-        
-        if (recentMatch) {
-          logger.debug(`✅ Saison 2 confirmée via matchs récents`);
-          return 2;
-        }
-      }
-    } catch (error) {
-      logger.debug(`⚠️ Analyse matchs saison 2 échouée: ${error.message}`);
-    }
-
-    try {
-      const season1Matches = await this.makeRpcRequest('get_club_schedule', {
-        club_id: 1013,
-        season_id: 1
-      });
-      
-      if (season1Matches && Array.isArray(season1Matches) && season1Matches.length > 0) {
-        logger.debug(`✅ Fallback vers saison 1`);
-        return 1;
-      }
-    } catch (error) {
-      logger.debug(`⚠️ Fallback saison 1 échoué: ${error.message}`);
-    }
-
-    logger.warn('Impossible de déterminer la saison courante, utilisation de la saison 2');
+    // ✅ FALLBACK: Hardcodé sur saison 2 (évite les appels inutiles à get_club_schedule)
+    logger.warn('⚠️ Impossible de déterminer la saison dynamiquement, utilisation de la saison 2 par défaut');
+    this.currentSeasonCache = 2;
+    this.currentSeasonCacheTime = Date.now();
     return 2;
+  }
+
+  // ✅ NOUVEAU: Méthode pour obtenir la saison sans faire d'appels API
+  getCurrentSeasonCached() {
+    if (this.currentSeasonCache) {
+      return this.currentSeasonCache;
+    }
+    return 2; // Fallback sans appel API
+  }
+
+  // ✅ NOUVEAU: Forcer le refresh du cache (admin uniquement)
+  async refreshCurrentSeason() {
+    this.currentSeasonCache = null;
+    this.currentSeasonCacheTime = null;
+    return await this.getCurrentSeason();
   }
 
   async getClubLastMatch(clubId) {
@@ -241,10 +276,8 @@ class ApiClient {
       throw new Error('ID de club invalide');
     }
     
-    // ✅ CORRECTION MAJEURE: Utiliser get_club_schedule au lieu de get_clubs_last_fixture
-    // Raison: get_clubs_last_fixture NE RETOURNE PAS le flag "played"
-    // Ce flag est ESSENTIEL pour détecter si un match est terminé
     try {
+      // ✅ Essayer les deux saisons sans appeler getCurrentSeason()
       for (const seasonId of [2, 1]) {
         const result = await this.makeRpcRequest('get_club_schedule', {
           club_id: parseInt(clubId),
@@ -277,7 +310,7 @@ class ApiClient {
             competition_type: this.getCompetitionType(lastMatch.comp_type)
           };
           
-          logger.debug(`✅ Dernier match (S${seasonId}, played=${lastMatch.played}): ${enrichedMatch.home_club_name} ${lastMatch.home_goals}-${lastMatch.away_goals} ${enrichedMatch.away_club_name}`);
+          logger.debug(`✅ Dernier match (S${seasonId}): ${enrichedMatch.home_club_name} ${lastMatch.home_goals}-${lastMatch.away_goals} ${enrichedMatch.away_club_name}`);
           
           return enrichedMatch;
         }
@@ -323,7 +356,8 @@ class ApiClient {
       throw new Error('ID de club invalide');
     }
     
-    const currentSeason = await this.getCurrentSeason();
+    // ✅ Utiliser le cache au lieu d'appeler l'API à chaque fois
+    const currentSeason = this.getCurrentSeasonCached();
     
     const result = await this.makeRpcRequest('get_club_schedule', {
       club_id: parseInt(clubId),
