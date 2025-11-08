@@ -179,6 +179,9 @@ class SoccerverseBot {
         case 'encheres':
           await this.handleEncheresButton(interaction, params);
           break;
+        case 'composition':
+          await this.handleCompositionButton(interaction, params);
+          break;
         default:
           await interaction.reply({
             content: '❌ Interaction non reconnue.',
@@ -492,6 +495,80 @@ class SoccerverseBot {
           content: '❌ Action enchères non reconnue.', 
           flags: 64 // Ephemeral flag 
         });
+    }
+  }
+
+  async handleCompositionButton(interaction, params) {
+    // params[0] = 'done', params[1] = clubId, params[2] = matchDate
+    const subAction = params[0];
+    const clubId = params[1];
+    const matchDate = params[2];
+
+    if (subAction !== 'done') {
+      await interaction.reply({
+        content: '❌ Action non reconnue.',
+        flags: 64 // Ephemeral flag
+      });
+      return;
+    }
+
+    if (!clubId || !matchDate) {
+      await interaction.reply({
+        content: '❌ Données manquantes pour marquer la composition.',
+        flags: 64 // Ephemeral flag
+      });
+      return;
+    }
+
+    try {
+      // Vérifier si déjà marquée
+      const alreadyCompleted = this.dataManager.isCompositionCompleted(clubId, matchDate);
+
+      if (alreadyCompleted) {
+        const completionData = this.dataManager.getCompletedComposition(clubId, matchDate);
+        const completedBy = completionData.completedBy;
+        await interaction.reply({
+          content: `ℹ️ La composition pour ce match a déjà été marquée comme complétée ${completedBy ? `par <@${completedBy}>` : ''}.`,
+          flags: 64 // Ephemeral flag
+        });
+        return;
+      }
+
+      // Marquer comme complétée
+      this.dataManager.markCompositionCompleted(clubId, matchDate, interaction.user.id);
+      await this.dataManager.save();
+
+      // Désactiver le bouton dans le message original
+      try {
+        const disabledButton = new (require('discord.js').ButtonBuilder)()
+          .setCustomId(`composition_done_${clubId}_${matchDate}`)
+          .setLabel('✅ Composition faite')
+          .setStyle(require('discord.js').ButtonStyle.Success)
+          .setDisabled(true);
+
+        const disabledRow = new (require('discord.js').ActionRowBuilder)()
+          .addComponents(disabledButton);
+
+        await interaction.update({
+          components: [disabledRow]
+        });
+
+        logger.info(`✅ Composition marquée complétée: Club ${clubId}, Match ${matchDate} par ${interaction.user.id}`);
+      } catch (updateError) {
+        logger.error('Erreur mise à jour bouton:', updateError);
+        // Répondre quand même même si la mise à jour du bouton échoue
+        await interaction.reply({
+          content: '✅ Composition marquée comme complétée ! Vous ne recevrez plus de rappels pour ce match.',
+          flags: 64 // Ephemeral flag
+        });
+      }
+
+    } catch (error) {
+      logger.error('Erreur handleCompositionButton:', error);
+      await interaction.reply({
+        content: '❌ Une erreur est survenue lors du marquage de la composition.',
+        flags: 64 // Ephemeral flag
+      });
     }
   }
 
