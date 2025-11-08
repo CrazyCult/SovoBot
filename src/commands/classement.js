@@ -65,18 +65,38 @@ module.exports = {
         return;
       }
 
-      // Nom de la ligue et division
+      // Nom de la ligue
       const leagueName = apiClient.getLeagueNameByCountryDivision(clubData.country_id, clubData.division);
-      const divisionText = `Division: ${clubData.division}`;
+      const countryName = apiClient.formatCountryName(clubData.country_id);
 
       const embed = new EmbedBuilder()
         .setColor('#2196F3')
-        .setTitle(`⚽ ${leagueName}`)
-        .setDescription(`🌍 ${apiClient.formatCountryName(clubData.country_id)} • ${divisionText}`)
+        .setTitle(`📊 Classement - ${leagueName}`)
+        .setDescription(
+          `🌍 ${countryName} • Division ${clubData.division}\n` +
+          `**${apiClient.getClubName(clubId)}** est actuellement **${targetClub.new_position}ème** sur **${leagueTable.length} équipes**`
+        )
         .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`);
 
-      // Construire le tableau ligne par ligne avec un format plus lisible
-      const maxTeams = Math.min(leagueTable.length, 20);
+      // Info du club cible
+      const targetGoalDiff = targetClub.goals_for - targetClub.goals_against;
+      const targetGoalDiffStr = targetGoalDiff >= 0 ? `+${targetGoalDiff}` : `${targetGoalDiff}`;
+      const targetEvolution = this.getEvolutionEmoji(targetClub.old_position, targetClub.new_position);
+      const targetForme = this.formatFormEmoji(targetClub.form);
+      
+      embed.addFields({
+        name: `🏆 ${apiClient.getClubName(clubId)} (#${clubId})`,
+        value: 
+          `**Position:** ${targetClub.new_position}ème ${targetEvolution}\n` +
+          `**Points:** ${targetClub.pts} • **Matchs:** ${targetClub.played}\n` +
+          `**V-N-D:** ${targetClub.won}-${targetClub.drawn}-${targetClub.lost}\n` +
+          `**Buts:** ${targetClub.goals_for}:${targetClub.goals_against} (${targetGoalDiffStr})\n` +
+          `**Forme:** ${targetForme}`,
+        inline: false
+      });
+
+      // Construire le classement complet
+      const maxTeams = Math.min(leagueTable.length, 15);
       let tableLines = [];
 
       for (let i = 0; i < maxTeams; i++) {
@@ -84,46 +104,54 @@ module.exports = {
         const clubName = apiClient.getClubName(team.club_id);
         const isTarget = team.club_id === clubId;
         
-        // Tronquer le nom si trop long (max 16 caractères)
-        let displayName = clubName.length > 16 ? clubName.substring(0, 13) + '...' : clubName;
-        if (isTarget) {
-          displayName = `**${displayName}**`;
-        }
+        // Tronquer le nom si trop long
+        let displayName = clubName.length > 20 ? clubName.substring(0, 17) + '...' : clubName;
         
         const goalDiff = team.goals_for - team.goals_against;
         const goalDiffStr = goalDiff >= 0 ? `+${goalDiff}` : `${goalDiff}`;
-        const forme = this.formatFormEmoji(team.form);
+        const evolution = this.getEvolutionEmoji(team.old_position, team.new_position);
         
-        // Format: Position | Nom | Stats | Forme
-        const line = `**${team.new_position}.** ${displayName}\n` +
-                     `${team.pts}pts • ${team.played}MJ • ${team.won}V ${team.drawn}N ${team.lost}D • ${team.goals_for}:${team.goals_against} (${goalDiffStr})\n` +
-                     `${forme}`;
-        
-        tableLines.push(line);
+        // Format compact sur une ligne
+        if (isTarget) {
+          tableLines.push(`**► ${team.new_position}. ${displayName} ◄** - ${team.pts}pts (${team.won}-${team.drawn}-${team.lost}) ${evolution}`);
+        } else {
+          tableLines.push(`${team.new_position}. ${displayName} - ${team.pts}pts (${team.won}-${team.drawn}-${team.lost}) ${evolution}`);
+        }
       }
 
-      // Diviser en plusieurs fields si nécessaire (max 1024 caractères)
-      const linesPerField = 5;
-      const numFields = Math.ceil(tableLines.length / linesPerField);
+      // Diviser en plusieurs fields si nécessaire (max 1024 caractères par field)
+      const linesPerField = 10;
+      const fieldLines = [];
       
-      for (let fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
-        const startIndex = fieldIndex * linesPerField;
-        const endIndex = Math.min(startIndex + linesPerField, tableLines.length);
-        const fieldLines = tableLines.slice(startIndex, endIndex);
-        
-        const fieldName = numFields === 1 ? 
-          `📊 Classement (${maxTeams} équipes)` : 
-          `📊 Classement (${startIndex + 1}-${endIndex})`;
+      for (let i = 0; i < tableLines.length; i += linesPerField) {
+        const chunk = tableLines.slice(i, i + linesPerField);
+        fieldLines.push(chunk.join('\n'));
+      }
+
+      // Ajouter les fields
+      fieldLines.forEach((content, index) => {
+        const fieldName = index === 0 ? 
+          `📋 Classement complet (${leagueTable.length} équipes)` : 
+          `📋 Suite`;
         
         embed.addFields({
           name: fieldName,
-          value: fieldLines.join('\n\n'),
+          value: content,
+          inline: false
+        });
+      });
+
+      // Afficher plus d'équipes si le classement est long
+      if (leagueTable.length > maxTeams) {
+        embed.addFields({
+          name: '📝 Note',
+          value: `Affichage des ${maxTeams} premières équipes sur ${leagueTable.length} au total.`,
           inline: false
         });
       }
 
       embed.setFooter({ 
-        text: `Ligue #${clubData.league_id} • Saison ${targetClub.season_id} • Soccerverse Bot` 
+        text: `Ligue #${clubData.league_id} • Saison ${targetClub.season_id} • Soccerverse Bot v3.0` 
       })
       .setTimestamp();
 
@@ -145,6 +173,18 @@ module.exports = {
     }
   },
 
+  getEvolutionEmoji(oldPosition, newPosition) {
+    if (!oldPosition || oldPosition === newPosition) {
+      return '(=)';
+    } else if (newPosition < oldPosition) {
+      const diff = oldPosition - newPosition;
+      return `(⬆️${diff})`;
+    } else {
+      const diff = newPosition - oldPosition;
+      return `(⬇️${diff})`;
+    }
+  },
+
   formatFormEmoji(form) {
     if (!form) return '⚪⚪⚪⚪⚪⚪';
     
@@ -159,6 +199,7 @@ module.exports = {
     }).join('');
     
     // Padding si moins de 6 matchs
-    return last6.padEnd(6, '⚪').substring(0, 6).split('').join('');
+    const padded = last6 + '⚪'.repeat(Math.max(0, 6 - last6.length));
+    return padded.substring(0, 6);
   }
 };
