@@ -81,7 +81,7 @@ module.exports = {
 
       for (let i = 0; i < maxTeams; i++) {
         const team = leagueTable[i];
-        const clubName = apiClient.getClubName(team.club_id);
+        const clubName = team.club_name; // ✅ Utilise le nom déjà enrichi par getLeagueTable
         const isTarget = team.club_id === clubId;
         
         // Tronquer le nom si trop long (max 16 caractères)
