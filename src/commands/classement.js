@@ -101,8 +101,8 @@ module.exports = {
         tableLines.push(line);
       }
 
-      // Format compact permet d'afficher plus d'équipes par field
-      const linesPerField = 10;
+      // Format compact : 7 équipes max par field pour rester sous 1024 caractères (limite Discord)
+      const linesPerField = 7;
       const numFields = Math.ceil(tableLines.length / linesPerField);
 
       for (let fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
