@@ -7,7 +7,8 @@ class DataManager {
     this.dataFile = path.join(__dirname, '..', '..', 'data', 'bot_data.json');
     this.data = {
       registrations: new Map(), // channelId -> Map(clubId -> {clubId, registeredBy, registeredAt})
-      settings: new Map()       // channelId -> settings object
+      settings: new Map(),      // channelId -> settings object
+      completedCompositions: new Map() // `${clubId}_${matchDate}` -> {clubId, matchDate, completedAt, completedBy}
     };
   }
 
@@ -60,10 +61,16 @@ class DataManager {
           this.data.settings.set(channelId, settings);
         }
       }
-      
+
+      if (jsonData.completedCompositions) {
+        for (const [key, data] of Object.entries(jsonData.completedCompositions)) {
+          this.data.completedCompositions.set(key, data);
+        }
+      }
+
       const totalChannels = this.data.registrations.size;
       const totalClubs = this.getAllRegisteredClubs().length;
-      
+
       logger.info(`✅ Données chargées: ${totalChannels} canaux, ${totalClubs} clubs`);
       
     } catch (error) {
@@ -76,6 +83,7 @@ class DataManager {
       const jsonData = {
         registrations: {},
         settings: {},
+        completedCompositions: {},
         lastSaved: new Date().toISOString()
       };
       
@@ -89,7 +97,11 @@ class DataManager {
       for (const [channelId, settings] of this.data.settings.entries()) {
         jsonData.settings[channelId] = settings;
       }
-      
+
+      for (const [key, data] of this.data.completedCompositions.entries()) {
+        jsonData.completedCompositions[key] = data;
+      }
+
       await fs.writeFile(this.dataFile, JSON.stringify(jsonData, null, 2));
       logger.debug('💾 Données sauvegardées');
       
@@ -227,6 +239,49 @@ class DataManager {
       logger.debug(`Canal ${channelId}: [${clubs.join(', ')}]`);
     }
     logger.debug('=== FIN DEBUG ===');
+  }
+
+  // =================== GESTION DES COMPOSITIONS COMPLÉTÉES ===================
+
+  markCompositionCompleted(clubId, matchDate, userId) {
+    const key = `${clubId}_${matchDate}`;
+    this.data.completedCompositions.set(key, {
+      clubId: clubId.toString(),
+      matchDate: parseInt(matchDate),
+      completedAt: Date.now(),
+      completedBy: userId
+    });
+    logger.info(`✅ Composition marquée complétée: Club ${clubId}, Match ${matchDate}`);
+  }
+
+  isCompositionCompleted(clubId, matchDate) {
+    const key = `${clubId}_${matchDate}`;
+    return this.data.completedCompositions.has(key);
+  }
+
+  getCompletedComposition(clubId, matchDate) {
+    const key = `${clubId}_${matchDate}`;
+    return this.data.completedCompositions.get(key) || null;
+  }
+
+  // Nettoyer les compositions complétées pour les matchs passés
+  cleanupOldCompositions() {
+    const now = Date.now() / 1000; // Convertir en secondes (format timestamp Soccerverse)
+    let cleanedCount = 0;
+
+    for (const [key, data] of this.data.completedCompositions.entries()) {
+      // Supprimer si le match date de plus de 7 jours
+      if (data.matchDate < (now - 7 * 24 * 60 * 60)) {
+        this.data.completedCompositions.delete(key);
+        cleanedCount++;
+      }
+    }
+
+    if (cleanedCount > 0) {
+      logger.info(`🧹 Nettoyage compositions: ${cleanedCount} entrées supprimées`);
+    }
+
+    return cleanedCount;
   }
 }
 

@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const logger = require('../utils/logger');
 
 class MatchNotificationWatcher {
@@ -94,21 +94,29 @@ class MatchNotificationWatcher {
 
       logger.debug(`Club ${clubId}: Match dans ${minutesUntilMatch}min, deadline dans ${minutesUntilDeadline}min`);
 
+      // Vérifier si la composition a déjà été marquée comme complétée
+      const compositionCompleted = this.dataManager.isCompositionCompleted(clubId, nextMatch.date);
+
+      if (compositionCompleted) {
+        logger.debug(`⏭️ Composition déjà complétée pour Club ${clubId}, match ${nextMatch.date} - pas de notification`);
+        return;
+      }
+
       // Vérifier si on doit envoyer une notification
       for (const notifyMinutes of this.notificationTimes) {
         const notificationKey = `${clubId}_${nextMatch.date}_${notifyMinutes}`;
-        
+
         // Vérifier si on est dans la fenêtre de notification
         const minWindow = notifyMinutes - 15; // -15 minutes de marge
         const maxWindow = notifyMinutes + 15; // +15 minutes de marge
-        
+
         const isInTimeWindow = minutesUntilDeadline >= minWindow && minutesUntilDeadline <= maxWindow;
-        
+
         if (isInTimeWindow && !this.sentNotifications.has(notificationKey)) {
           await this.sendMatchReminderNotification(clubId, nextMatch, notifyMinutes, channels);
           this.sentNotifications.set(notificationKey, Date.now());
           this.stats.notificationsSent++;
-          
+
           logger.info(`⚽ Notification envoyée: Club ${clubId}, ${notifyMinutes}min avant deadline`);
         }
       }
@@ -201,6 +209,15 @@ class MatchNotificationWatcher {
         inline: false
       });
 
+      // Créer le bouton "Composition faite"
+      const compositionDoneButton = new ButtonBuilder()
+        .setCustomId(`composition_done_${clubId}_${match.date}`)
+        .setLabel('✅ Composition faite')
+        .setStyle(ButtonStyle.Success);
+
+      const actionRow = new ActionRowBuilder()
+        .addComponents(compositionDoneButton);
+
       // Envoyer dans tous les canaux concernés
       for (const channelId of channels) {
         try {
@@ -216,11 +233,12 @@ class MatchNotificationWatcher {
 
           await channel.send({
             content: mentions, // 🔔 Mentions qui déclenchent les notifications
-            embeds: [embed]
+            embeds: [embed],
+            components: [actionRow]
           });
 
           logger.info(`⚽ Notification composition envoyée: ${clubName} (${minutesBeforeDeadline}min) → Canal ${channelId}`);
-          
+
         } catch (error) {
           logger.error(`Erreur envoi notification dans canal ${channelId}:`, error);
         }
@@ -305,6 +323,12 @@ class MatchNotificationWatcher {
 
     if (cleanedCount > 0) {
       logger.info(`🧹 Cache notifications nettoyé: ${cleanedCount} entrées supprimées`);
+    }
+
+    // Nettoyer aussi les compositions complétées anciennes
+    const compositionsCleanedCount = this.dataManager.cleanupOldCompositions();
+    if (compositionsCleanedCount > 0) {
+      this.dataManager.save();
     }
   }
 
