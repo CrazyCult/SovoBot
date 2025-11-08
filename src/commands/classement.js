@@ -81,43 +81,42 @@ module.exports = {
 
       for (let i = 0; i < maxTeams; i++) {
         const team = leagueTable[i];
-        const clubName = apiClient.getClubName(team.club_id);
+        const clubName = team.club_name; // ✅ Utilise le nom déjà enrichi par getLeagueTable
         const isTarget = team.club_id === clubId;
         
-        // Tronquer le nom si trop long (max 16 caractères)
-        let displayName = clubName.length > 16 ? clubName.substring(0, 13) + '...' : clubName;
-        if (isTarget) {
-          displayName = `**${displayName}**`;
-        }
-        
+        // Tronquer le nom si trop long (max 20 caractères pour format compact)
+        let displayName = clubName.length > 20 ? clubName.substring(0, 17) + '...' : clubName;
+
         const goalDiff = team.goals_for - team.goals_against;
         const goalDiffStr = goalDiff >= 0 ? `+${goalDiff}` : `${goalDiff}`;
         const forme = this.formatFormEmoji(team.form);
-        
-        // Format: Position | Nom | Stats | Forme
-        const line = `**${team.new_position}.** ${displayName}\n` +
-                     `${team.pts}pts • ${team.played}MJ • ${team.won}V ${team.drawn}N ${team.lost}D • ${team.goals_for}:${team.goals_against} (${goalDiffStr})\n` +
-                     `${forme}`;
-        
+
+        // Format compact sur une seule ligne
+        const positionText = isTarget ? `**${team.new_position}.**` : `${team.new_position}.`;
+        const nameText = isTarget ? `**${displayName}**` : displayName;
+        const statsText = `${team.pts}pts • ${team.won}-${team.drawn}-${team.lost} • ${team.goals_for}:${team.goals_against} (${goalDiffStr})`;
+
+        const line = `${positionText} ${nameText} • ${statsText} ${forme}`;
+
         tableLines.push(line);
       }
 
-      // Diviser en plusieurs fields si nécessaire (max 1024 caractères)
-      const linesPerField = 5;
+      // Format compact permet d'afficher plus d'équipes par field
+      const linesPerField = 10;
       const numFields = Math.ceil(tableLines.length / linesPerField);
-      
+
       for (let fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
         const startIndex = fieldIndex * linesPerField;
         const endIndex = Math.min(startIndex + linesPerField, tableLines.length);
         const fieldLines = tableLines.slice(startIndex, endIndex);
-        
-        const fieldName = numFields === 1 ? 
-          `📊 Classement (${maxTeams} équipes)` : 
+
+        const fieldName = numFields === 1 ?
+          `📊 Classement (${maxTeams} équipes)` :
           `📊 Classement (${startIndex + 1}-${endIndex})`;
-        
+
         embed.addFields({
           name: fieldName,
-          value: fieldLines.join('\n\n'),
+          value: fieldLines.join('\n'),
           inline: false
         });
       }
