@@ -214,7 +214,7 @@ class ClubNewsWatcher {
       }
 
       // Créer le message de notification
-      const newsMessage = this.formatNewsMessage(message);
+      const newsMessage = this.formatNewsMessage(message, clubId);
       const messageDate = new Date(message.date * 1000);
       const clubName = this.apiClient.getClubName(clubId);
 
@@ -276,16 +276,18 @@ class ClubNewsWatcher {
     }
   }
 
-  formatNewsMessage(message) {
+  formatNewsMessage(message, clubId) {
     const type = message.type;
     const playerId = message.data_1;
     const data2 = message.data_2;
-    const club1 = message.club_1;
-    const club2 = message.club_2;
+    const club1 = parseInt(message.club_1);
+    const club2 = parseInt(message.club_2);
     const name = message.name_1;
+    const clubIdNum = parseInt(clubId);
 
     // Récupérer le nom du joueur si c'est un événement joueur
     const playerName = playerId ? this.apiClient.getPlayerName(playerId) : null;
+    const club1Name = club1 ? this.apiClient.getClubName(club1) : null;
     const club2Name = club2 ? this.apiClient.getClubName(club2) : null;
 
     switch(type) {
@@ -293,10 +295,24 @@ class ClubNewsWatcher {
         return `🔒 **${playerName}** a été retiré du marché.`;
 
       case 9:
+        // Diviser le montant par 10 000 pour avoir le montant en dollars
+        const amount = Math.round(data2 / 10000);
+
+        // Si club1 === 0, le joueur arrive en free agent
         if (club1 === 0) {
-          return `💰 **${playerName}** est arrivé de ${club2Name} pour **${data2.toLocaleString()} $**.`;
-        } else {
-          return `💰 **${playerName}** a été transféré à ${club2Name} pour **${data2.toLocaleString()} $**.`;
+          return `💰 **${playerName}** est arrivé (free agent) pour **${amount.toLocaleString()} $**.`;
+        }
+        // Si club1 === clubId, le joueur PART du club surveillé vers club2
+        else if (club1 === clubIdNum) {
+          return `💰 **${playerName}** a été transféré à **${club2Name}** pour **${amount.toLocaleString()} $**.`;
+        }
+        // Si club2 === clubId, le joueur ARRIVE au club surveillé depuis club1
+        else if (club2 === clubIdNum) {
+          return `💰 **${playerName}** est arrivé de **${club1Name}** pour **${amount.toLocaleString()} $**.`;
+        }
+        // Cas par défaut (ne devrait pas arriver)
+        else {
+          return `💰 Transfert de **${playerName}** : ${club1Name} → ${club2Name} pour **${amount.toLocaleString()} $**.`;
         }
 
       case 83:
