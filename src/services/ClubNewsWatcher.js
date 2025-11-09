@@ -304,7 +304,7 @@ class ClubNewsWatcher {
         }
         // Si club1 === clubId, le joueur PART du club surveillé vers club2
         else if (club1 === clubIdNum) {
-          return `💰 **${playerName}** a été transféré à **${club2Name}** pour **${amount.toLocaleString()} $**.`;
+          return `💰 **${playerName}** a quitté le club pour rejoindre **${club2Name}** pour **${amount.toLocaleString()} $**.`;
         }
         // Si club2 === clubId, le joueur ARRIVE au club surveillé depuis club1
         else if (club2 === clubIdNum) {
