@@ -24,28 +24,28 @@ module.exports = {
     // Commandes spéciales
     switch (action) {
       case 'start':
-        await this.startWatching(message, channelId, { dataManager, encheresWatcher });
+        await this.startWatching(message, channelId, { dataManager, encheresWatcher, apiClient });
         break;
-        
+
       case 'stop':
-        await this.stopWatching(message, channelId, { dataManager, encheresWatcher });
+        await this.stopWatching(message, channelId, { dataManager, encheresWatcher, apiClient });
         break;
-        
+
       case 'status':
-        await this.showStatus(message, channelId, { dataManager, encheresWatcher });
+        await this.showStatus(message, channelId, { dataManager, encheresWatcher, apiClient });
         break;
-        
+
       case 'list':
         await this.showWatchedAuctions(message, channelId, { dataManager, apiClient });
         break;
-        
+
       default:
         // Si aucun argument, démarrer la surveillance pour les clubs inscrits
-        await this.startWatching(message, channelId, { dataManager, encheresWatcher });
+        await this.startWatching(message, channelId, { dataManager, encheresWatcher, apiClient });
     }
   },
 
-  async startWatching(message, channelId, { dataManager, encheresWatcher }) {
+  async startWatching(message, channelId, { dataManager, encheresWatcher, apiClient }) {
     const registeredClubs = dataManager.getChannelClubs(channelId);
     
     if (registeredClubs.length === 0) {
@@ -149,7 +149,7 @@ module.exports = {
     });
   },
 
-  async stopWatching(message, channelId, { dataManager, encheresWatcher }) {
+  async stopWatching(message, channelId, { dataManager, encheresWatcher, apiClient }) {
     const settings = dataManager.getChannelSettings(channelId);
     
     if (!settings.encheresWatching || !settings.encheresWatching.enabled) {
@@ -324,7 +324,7 @@ module.exports = {
     }
   },
 
-  async showStatus(message, channelId, { dataManager, encheresWatcher }) {
+  async showStatus(message, channelId, { dataManager, encheresWatcher, apiClient }) {
     const settings = dataManager.getChannelSettings(channelId);
     const encheresWatching = settings.encheresWatching;
     
