@@ -181,7 +181,21 @@ class ClubNewsWatcher {
     }
 
     // Filtrer uniquement les types de messages pertinents
-    const relevantTypes = [7, 9, 83, 92, 94, 96, 500, 501, 504];
+    const relevantTypes = [
+      7,   // Retiré du marché
+      9,   // Transfert
+      81,  // Renouvellement de contrat
+      83,  // Mis en vente
+      92,  // Blessure
+      94,  // Blessure sérieuse
+      96,  // Suspension
+      97,  // Suspension 3 matchs (expulsion)
+      98,  // Suspension (accumulation cartons jaunes)
+      255, // Passage au tour suivant de la coupe
+      500, // Nouveau manager
+      501, // Nouvel entraineur
+      504  // Départ entraineur
+    ];
 
     if (!relevantTypes.includes(message.type)) {
       logger.debug(`📰 Message type ${message.type} ignoré (non pertinent)`);
@@ -260,7 +274,7 @@ class ClubNewsWatcher {
             .setFooter({ text: 'Soccerverse Bot v3.0' });
 
           // Ajouter un lien vers le joueur si c'est un événement joueur
-          if (message.data_1 && [7, 9, 83, 92, 94, 96].includes(message.type)) {
+          if (message.data_1 && [7, 9, 81, 83, 92, 94, 96, 97, 98].includes(message.type)) {
             embed.addFields({
               name: '🔗 Liens',
               value: `[Voir le joueur](https://play.soccerverse.com/player/${message.data_1}) • [Voir le club](https://play.soccerverse.com/club/${clubId})`,
@@ -324,6 +338,11 @@ class ClubNewsWatcher {
           return `💰 Transfert de **${playerName}** : ${club1Name} → ${club2Name} pour **${amount.toLocaleString()} $**.`;
         }
 
+      case 81:
+        // Renouvellement de contrat
+        const contractAmount = Math.round(data2 / 10000);
+        return `📝 **${playerName}** a renouvelé son contrat pour **${contractAmount.toLocaleString()} $**.`;
+
       case 83:
         return `🏷️ **${playerName}** a été mis en vente.`;
 
@@ -335,6 +354,19 @@ class ClubNewsWatcher {
 
       case 96:
         return `🟥 **${playerName}** est suspendu pour **${data2} match${data2 > 1 ? 's' : ''}**.`;
+
+      case 97:
+        // Suspension de 3 matchs suite à une expulsion
+        return `🟥🟥 **${playerName}** est suspendu pour **3 matchs** suite à son expulsion.`;
+
+      case 98:
+        // Suspension pour accumulation de cartons jaunes
+        return `🟨➡️🟥 **${playerName}** est suspendu pour **${data2} match${data2 > 1 ? 's' : ''}** (accumulation de cartons jaunes).`;
+
+      case 255:
+        // Passage au tour suivant de la coupe
+        const cupName = name || 'la coupe';
+        return `🏆✨ Le club est qualifié pour le tour suivant de **${cupName}** !`;
 
       case 500:
         return `👨‍💼 **${name || 'Un nouveau manager'}** arrive comme manager.`;
@@ -354,15 +386,21 @@ class ClubNewsWatcher {
     switch(type) {
       case 9: // Transfert
         return '#3498db'; // Bleu
+      case 81: // Renouvellement de contrat
+        return '#2ecc71'; // Vert (succès)
       case 92: // Blessure
       case 94: // Blessure sérieuse
         return '#e74c3c'; // Rouge
       case 96: // Suspension
+      case 97: // Suspension 3 matchs (expulsion)
+      case 98: // Suspension (cartons jaunes)
         return '#e67e22'; // Orange
       case 83: // Mis en vente
         return '#f39c12'; // Jaune
       case 7: // Retiré du marché
         return '#95a5a6'; // Gris
+      case 255: // Qualification coupe
+        return '#f1c40f'; // Or (succès)
       case 500: // Manager
       case 501: // Entraineur
       case 504: // Départ entraineur
