@@ -216,6 +216,7 @@ class ClubNewsWatcher {
       // Créer le message de notification
       const newsMessage = this.formatNewsMessage(message);
       const messageDate = new Date(message.date * 1000);
+      const clubName = this.apiClient.getClubName(clubId);
 
       for (const channelId of channelsForClub) {
         try {
@@ -232,8 +233,9 @@ class ClubNewsWatcher {
           // Créer un embed simple
           const embed = new EmbedBuilder()
             .setColor(this.getColorForMessageType(message.type))
-            .setTitle(`📰 Actualité du Club #${clubId}`)
+            .setTitle(`📰 Actualité - ${clubName}`)
             .setDescription(newsMessage)
+            .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
             .addFields({
               name: '📅 Date',
               value: messageDate.toLocaleDateString('fr-FR', {
@@ -247,6 +249,15 @@ class ClubNewsWatcher {
             })
             .setTimestamp()
             .setFooter({ text: 'Soccerverse Bot v3.0' });
+
+          // Ajouter un lien vers le joueur si c'est un événement joueur
+          if (message.data_1 && [7, 9, 83, 92, 94, 96].includes(message.type)) {
+            embed.addFields({
+              name: '🔗 Liens',
+              value: `[Voir le joueur](https://play.soccerverse.com/player/${message.data_1}) • [Voir le club](https://play.soccerverse.com/club/${clubId})`,
+              inline: false
+            });
+          }
 
           await channel.send({
             content: mentions,
@@ -273,37 +284,41 @@ class ClubNewsWatcher {
     const club2 = message.club_2;
     const name = message.name_1;
 
+    // Récupérer le nom du joueur si c'est un événement joueur
+    const playerName = playerId ? this.apiClient.getPlayerName(playerId) : null;
+    const club2Name = club2 ? this.apiClient.getClubName(club2) : null;
+
     switch(type) {
       case 7:
-        return `🔒 Le joueur #${playerId} a été retiré du marché.`;
+        return `🔒 **${playerName}** a été retiré du marché.`;
 
       case 9:
         if (club1 === 0) {
-          return `💰 Le joueur #${playerId} est arrivé du club #${club2} pour ${data2.toLocaleString()} $.`;
+          return `💰 **${playerName}** est arrivé de ${club2Name} pour **${data2.toLocaleString()} $**.`;
         } else {
-          return `💰 Le joueur #${playerId} a été transféré au club #${club2} pour ${data2.toLocaleString()} $.`;
+          return `💰 **${playerName}** a été transféré à ${club2Name} pour **${data2.toLocaleString()} $**.`;
         }
 
       case 83:
-        return `🏷️ Le joueur #${playerId} a été mis en vente.`;
+        return `🏷️ **${playerName}** a été mis en vente.`;
 
       case 92:
-        return `🤕 Le joueur #${playerId} est blessé pour ${data2} jours.`;
+        return `🤕 **${playerName}** est blessé pour **${data2} jour${data2 > 1 ? 's' : ''}**.`;
 
       case 94:
-        return `🚑 Le joueur #${playerId} a une blessure sérieuse pour ${data2} jours.`;
+        return `🚑 **${playerName}** a une blessure sérieuse pour **${data2} jour${data2 > 1 ? 's' : ''}**.`;
 
       case 96:
-        return `🟥 Le joueur #${playerId} est suspendu pour ${data2} match${data2 > 1 ? 's' : ''}.`;
+        return `🟥 **${playerName}** est suspendu pour **${data2} match${data2 > 1 ? 's' : ''}**.`;
 
       case 500:
-        return `👨‍💼 ${name || 'Un nouveau manager'} arrive comme manager.`;
+        return `👨‍💼 **${name || 'Un nouveau manager'}** arrive comme manager.`;
 
       case 501:
-        return `👨‍💼 ${name || 'Un nouvel entraineur'} arrive comme entraineur.`;
+        return `👨‍💼 **${name || 'Un nouvel entraineur'}** arrive comme entraineur.`;
 
       case 504:
-        return `👋 ${name || 'L\'entraineur'} quitte son poste d'entraineur.`;
+        return `👋 **${name || 'L\'entraineur'}** quitte son poste d'entraineur.`;
 
       default:
         return `❓ Nouvelle actualité (Type ${type})`;
