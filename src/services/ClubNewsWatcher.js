@@ -97,8 +97,15 @@ class ClubNewsWatcher {
       logger.info(`📰 Vérification actualités pour ${registeredClubs.length} club(s)`);
 
       // Vérifier chaque club avec un délai pour éviter de surcharger l'API
+      let validClubIndex = 0;
       for (let i = 0; i < registeredClubs.length; i++) {
         const clubId = parseInt(registeredClubs[i]);
+
+        // Ignorer les IDs invalides
+        if (isNaN(clubId)) {
+          logger.warn(`⚠️ ID de club invalide ignoré dans les actualités: "${registeredClubs[i]}"`);
+          continue;
+        }
 
         setTimeout(async () => {
           try {
@@ -106,7 +113,9 @@ class ClubNewsWatcher {
           } catch (error) {
             logger.error(`❌ Erreur vérification actualités club ${clubId}:`, error.message);
           }
-        }, i * 2000); // 2 secondes d'écart entre chaque club
+        }, validClubIndex * 2000); // 2 secondes d'écart entre chaque club
+
+        validClubIndex++;
       }
 
       // Nettoyage des anciens messages

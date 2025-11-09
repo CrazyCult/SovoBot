@@ -265,12 +265,19 @@ class MatchNotificationWatcher {
 
   getAllRegisteredClubs() {
     const clubMap = new Map();
-    
+
     // CORRECTION: Utiliser registrations au lieu de channels
     for (const [channelId, clubsMap] of this.dataManager.data.registrations.entries()) {
       if (clubsMap && clubsMap.size > 0) {
         for (const [clubId, clubInfo] of clubsMap.entries()) {
           const clubIdNum = parseInt(clubId);
+
+          // Ignorer les IDs invalides
+          if (isNaN(clubIdNum) || clubIdNum <= 0) {
+            logger.warn(`⚠️ ID de club invalide ignoré dans MatchNotificationWatcher: "${clubId}"`);
+            continue;
+          }
+
           if (!clubMap.has(clubIdNum)) {
             clubMap.set(clubIdNum, []);
           }
@@ -278,7 +285,7 @@ class MatchNotificationWatcher {
         }
       }
     }
-    
+
     return Array.from(clubMap.entries()).map(([clubId, channels]) => ({
       clubId,
       channels: [...new Set(channels)]

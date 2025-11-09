@@ -177,7 +177,13 @@ class DataManager {
     const allClubs = new Set();
     for (const clubMap of this.data.registrations.values()) {
       for (const clubId of clubMap.keys()) {
-        allClubs.add(clubId);
+        // Ne garder que les IDs de clubs valides (nombres)
+        const clubIdNum = parseInt(clubId);
+        if (!isNaN(clubIdNum) && clubIdNum > 0) {
+          allClubs.add(clubId);
+        } else {
+          logger.warn(`⚠️ ID de club invalide ignoré dans getAllRegisteredClubs: "${clubId}"`);
+        }
       }
     }
     return Array.from(allClubs);
