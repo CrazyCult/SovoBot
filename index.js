@@ -230,12 +230,12 @@ class SoccerverseBot {
       return;
     }
 
-    this.dataManager.registerTeam(channelId, clubId);
+    this.dataManager.registerTeam(channelId, clubId, interaction.user.id);
     await this.dataManager.save();
-    
-    await interaction.reply({ 
-      content: `✅ Club ID ${clubId} enregistré ! Vous recevrez les notifications dans ce salon.`, 
-      flags: 64 // Ephemeral flag 
+
+    await interaction.reply({
+      content: `✅ Club ID ${clubId} enregistré ! Vous recevrez les notifications (avec mentions) dans ce salon.`,
+      flags: 64 // Ephemeral flag
     });
   }
 
