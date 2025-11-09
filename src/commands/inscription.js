@@ -97,7 +97,7 @@ module.exports = {
           },
           {
             name: '🔔 Notifications',
-            value: 'Vous recevrez des mentions (@vous) pour:\n• Rappels de composition (6h/3h/1h avant)\n• Résultats de matchs\n• Enchères du club',
+            value: 'Vous recevrez des mentions (@vous) pour:\n• Rappels de composition (6h/3h/1h avant)\n• Résultats de matchs\n• Enchères du club\n• Actualités du club (blessures, transferts, suspensions...)',
             inline: false
           }
         )

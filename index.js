@@ -10,6 +10,7 @@ const MatchNotificationWatcher = require('./src/services/MatchNotificationWatche
 const MatchResultWatcher = require('./src/services/MatchResultWatcher');
 const PolygonStalkerService = require('./src/services/PolygonStalkerService');
 const EncheresWatcher = require('./src/services/EncheresWatcher');
+const ClubNewsWatcher = require('./src/services/ClubNewsWatcher');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -38,6 +39,7 @@ class SoccerverseBot {
     this.matchResultWatcher = null;
     this.polygonStalkerService = null;
     this.encheresWatcher = null;
+    this.clubNewsWatcher = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -96,6 +98,10 @@ class SoccerverseBot {
       // Initialiser le service de surveillance des enchères
       this.encheresWatcher = new EncheresWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('🏆 Service de surveillance des enchères initialisé');
+
+      // Initialiser le service de surveillance des actualités du club
+      this.clubNewsWatcher = new ClubNewsWatcher(this.client, this.dataManager, this.apiClient);
+      logger.info('📰 Service de surveillance des actualités du club initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -122,7 +128,8 @@ class SoccerverseBot {
           matchNotificationWatcher: this.matchNotificationWatcher,
           matchResultWatcher: this.matchResultWatcher,
           polygonStalkerService: this.polygonStalkerService,
-          encheresWatcher: this.encheresWatcher
+          encheresWatcher: this.encheresWatcher,
+          clubNewsWatcher: this.clubNewsWatcher
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -303,7 +310,8 @@ class SoccerverseBot {
               matchNotificationWatcher: this.matchNotificationWatcher,
               matchResultWatcher: this.matchResultWatcher,
               polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher
+              encheresWatcher: this.encheresWatcher,
+              clubNewsWatcher: this.clubNewsWatcher
             });
           }
         } catch (error) {
@@ -376,7 +384,8 @@ class SoccerverseBot {
               matchNotificationWatcher: this.matchNotificationWatcher,
               matchResultWatcher: this.matchResultWatcher,
               polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher
+              encheresWatcher: this.encheresWatcher,
+              clubNewsWatcher: this.clubNewsWatcher
             });
           }
         } catch (error) {
@@ -479,7 +488,8 @@ class SoccerverseBot {
               matchNotificationWatcher: this.matchNotificationWatcher,
               matchResultWatcher: this.matchResultWatcher,
               polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher
+              encheresWatcher: this.encheresWatcher,
+              clubNewsWatcher: this.clubNewsWatcher
             });
           }
         } catch (error) {
