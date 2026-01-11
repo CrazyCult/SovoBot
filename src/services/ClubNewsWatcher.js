@@ -31,16 +31,16 @@ class ClubNewsWatcher {
 
       if (settings && settings.processedMessages) {
         const map = new Map();
-        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000); // 🔥 60 jours pour éviter les doublons
 
-        // Charger tous les messages récents (30 derniers jours)
+        // Charger tous les messages récents (60 derniers jours)
         for (const [key, data] of Object.entries(settings.processedMessages)) {
-          if (data.timestamp > thirtyDaysAgo) {
+          if (data.timestamp > sixtyDaysAgo) {
             map.set(key, data);
           }
         }
 
-        logger.info(`📰 ${map.size} message(s) d'actualités déjà traité(s) chargé(s) depuis le cache (30 derniers jours)`);
+        logger.info(`📰 ${map.size} message(s) d'actualités déjà traité(s) chargé(s) depuis le cache (60 derniers jours)`);
         return map;
       }
     } catch (error) {
@@ -150,15 +150,37 @@ class ClubNewsWatcher {
         return !this.processedMessages.has(messageKey);
       });
 
-      if (newMessages.length === 0) {
-        logger.debug(`📰 Aucune nouvelle actualité pour le club ${clubId}`);
+      // 🔥 NOUVELLE VÉRIFICATION: Filtrer les messages trop anciens (>7 jours)
+      // Cela évite de re-notifier de vieilles actualités si le cache a été perdu
+      const sevenDaysAgo = Date.now() / 1000 - (7 * 24 * 60 * 60);
+      const recentMessages = newMessages.filter(msg => msg.date > sevenDaysAgo);
+
+      // Marquer les vieux messages comme traités sans les notifier
+      const oldMessages = newMessages.filter(msg => msg.date <= sevenDaysAgo);
+      if (oldMessages.length > 0) {
+        logger.debug(`📰 ${oldMessages.length} actualité(s) trop ancienne(s) pour le club ${clubId}, ajout au cache sans notification`);
+        for (const msg of oldMessages) {
+          const messageKey = `${clubId}_${msg.message_id}`;
+          this.processedMessages.set(messageKey, {
+            timestamp: Date.now(),
+            clubId: clubId,
+            messageId: msg.message_id,
+            type: msg.type,
+            date: msg.date
+          });
+        }
+        await this.saveProcessedMessages();
+      }
+
+      if (recentMessages.length === 0) {
+        logger.debug(`📰 Aucune nouvelle actualité récente pour le club ${clubId}`);
         return;
       }
 
-      logger.info(`📰 ${newMessages.length} nouvelle(s) actualité(s) détectée(s) pour le club ${clubId}`);
+      logger.info(`📰 ${recentMessages.length} nouvelle(s) actualité(s) récente(s) détectée(s) pour le club ${clubId}`);
 
-      // Traiter chaque nouveau message
-      for (const message of newMessages) {
+      // Traiter chaque nouveau message récent
+      for (const message of recentMessages) {
         await this.processClubMessage(clubId, message);
       }
 
@@ -424,11 +446,11 @@ class ClubNewsWatcher {
   }
 
   cleanupProcessedMessages() {
-    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000); // 🔥 60 jours pour éviter les doublons
     let cleanedCount = 0;
 
     for (const [key, messageData] of this.processedMessages.entries()) {
-      if (messageData.timestamp < thirtyDaysAgo) {
+      if (messageData.timestamp < sixtyDaysAgo) {
         this.processedMessages.delete(key);
         cleanedCount++;
       }
@@ -438,7 +460,7 @@ class ClubNewsWatcher {
       this.saveProcessedMessages().catch(err => {
         logger.error('❌ Erreur sauvegarde après nettoyage actualités:', err);
       });
-      logger.info(`🧹 Cache actualités nettoyé: ${cleanedCount} message(s) ancien(s) supprimé(s) (>30 jours)`);
+      logger.info(`🧹 Cache actualités nettoyé: ${cleanedCount} message(s) ancien(s) supprimé(s) (>60 jours)`);
     }
 
     logger.debug(`🧹 Nettoyage actualités: ${this.processedMessages.size} messages traités`);
