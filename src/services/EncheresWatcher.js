@@ -238,23 +238,40 @@ class EncheresWatcher {
       const startedBy = settings.encheresWatching?.startedBy;
       
       const playerName = this.apiClient.getPlayerName(auction.player_id);
-      
-      let winnerName = 'Inconnu';
+
+      // 🔥 CORRECTION: Utiliser les infos de l'enchère comme valeurs par défaut
+      let winnerName = this.apiClient.getClubName(auction.highest_bidder);
       let finalPrice = auction.highest_bid || 0;
-      
+      let winnerClubId = auction.highest_bidder;
+
+      // 🔥 NOUVELLE API: Récupérer l'historique des transferts du joueur (données réelles post-transfert)
       try {
-        const finalDetails = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
+        const transferHistory = await this.apiClient.makeRpcRequest('get_player_transfer_history', {
           player_id: auction.player_id
         });
-        
-        if (finalDetails && finalDetails.data) {
-          if (finalDetails.data.high_bid) {
-            winnerName = this.apiClient.getClubName(finalDetails.data.high_bid.club_id);
-            finalPrice = finalDetails.data.high_bid.amount;
+
+        // Le transfert le plus récent est le premier dans le tableau
+        if (transferHistory && Array.isArray(transferHistory) && transferHistory.length > 0) {
+          const latestTransfer = transferHistory[0];
+
+          // Vérifier que c'est un transfert récent (moins de 5 minutes)
+          const transferDate = new Date(latestTransfer.date * 1000);
+          const now = new Date();
+          const diffMinutes = (now - transferDate) / (1000 * 60);
+
+          if (diffMinutes < 5 && latestTransfer.club_id_to && latestTransfer.amount) {
+            winnerClubId = latestTransfer.club_id_to;
+            winnerName = this.apiClient.getClubName(winnerClubId);
+            finalPrice = latestTransfer.amount;
+            logger.info(`✅ Transfert réel confirmé pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
+          } else {
+            logger.debug(`⚠️ Transfert trouvé mais trop ancien (${Math.round(diffMinutes)} min), utilisation données d'enchère`);
           }
+        } else {
+          logger.debug(`⚠️ Aucun historique de transfert trouvé pour ${playerName}, utilisation données d'enchère`);
         }
       } catch (error) {
-        logger.debug(`Impossible de récupérer les détails finaux pour ${playerName}`);
+        logger.debug(`⚠️ Impossible de récupérer l'historique des transferts pour ${playerName}:`, error.message);
       }
       
       const embed = new EmbedBuilder()
@@ -297,7 +314,7 @@ class EncheresWatcher {
         embeds: [embed] 
       });
       
-      logger.info(`🏁 Notification fin enchère envoyée: ${playerName} → ${winnerName}`);
+      logger.info(`🏁 Notification fin enchère envoyée: ${playerName} → ${winnerName} (${this.formatCurrency(finalPrice)})`);
       
     } catch (error) {
       logger.error('Erreur envoi notification fin enchère:', error);
