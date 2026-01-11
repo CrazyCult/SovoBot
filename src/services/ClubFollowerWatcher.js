@@ -1,6 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const logger = require('../utils/logger');
 const axios = require('axios');
+const cron = require('node-cron');
 
 class ClubFollowerWatcher {
   constructor(client, dataManager, apiClient) {
@@ -365,6 +366,159 @@ class ClubFollowerWatcher {
     };
   }
 
+  // =================== MISE À JOUR HEBDOMADAIRE ===================
+
+  async refreshAllPortfolios() {
+    logger.info('🔄 Début de la mise à jour hebdomadaire des portefeuilles...');
+
+    let totalUpdated = 0;
+    let totalErrors = 0;
+
+    for (const [channelId, config] of this.channelConfigs.entries()) {
+      // Ignorer les suivis manuels de clubs (sans username)
+      if (!config.username) {
+        logger.debug(`⏭️ Skip ${channelId}: suivi manuel de clubs (pas de portefeuille)`);
+        continue;
+      }
+
+      try {
+        logger.info(`🔄 Mise à jour du portefeuille de ${config.username} dans ${channelId}...`);
+
+        // Récupérer les parts actuelles depuis l'API
+        const currentShares = await this.fetchShareBalances(config.username, config.minInfluence);
+
+        // Filtrer les doublons (clubs déjà suivis par cet utilisateur ailleurs)
+        const alreadyFollowed = this.getAlreadyFollowedClubs(config.startedBy, channelId);
+        const filteredShares = currentShares.filter(share =>
+          !alreadyFollowed.includes(share.club_id.toString())
+        );
+
+        // Comparer avec les clubs actuellement suivis
+        const oldClubIds = new Set(config.clubs.map(c => c.club_id));
+        const newClubIds = new Set(filteredShares.map(c => c.club_id));
+
+        // Clubs à ajouter (nouveaux au-dessus du seuil)
+        const clubsToAdd = filteredShares.filter(share => !oldClubIds.has(share.club_id));
+
+        // Clubs à retirer (maintenant en-dessous du seuil ou vendus)
+        const clubsToRemove = config.clubs.filter(club => !newClubIds.has(club.club_id));
+
+        // Appliquer les changements
+        if (clubsToAdd.length > 0 || clubsToRemove.length > 0) {
+          // Mettre à jour la liste des clubs
+          config.clubs = filteredShares;
+
+          // Initialiser le cache pour les nouveaux clubs
+          for (const share of clubsToAdd) {
+            await this.initializeClubCache(channelId, share);
+            await this.sleep(500); // Délai pour éviter de surcharger l'API
+          }
+
+          // Nettoyer le cache des clubs retirés
+          for (const club of clubsToRemove) {
+            if (config.cache[club.club_id]) {
+              delete config.cache[club.club_id];
+            }
+          }
+
+          // Réinitialiser l'index si nécessaire
+          if (config.currentIndex >= config.clubs.length && config.clubs.length > 0) {
+            config.currentIndex = 0;
+          }
+
+          // Sauvegarder
+          await this.saveConfigurations();
+
+          // Envoyer une notification à l'utilisateur
+          await this.sendPortfolioUpdateNotification(channelId, config, clubsToAdd, clubsToRemove);
+
+          totalUpdated++;
+          logger.info(`✅ Portefeuille de ${config.username} mis à jour: +${clubsToAdd.length} clubs, -${clubsToRemove.length} clubs`);
+        } else {
+          logger.info(`✓ Aucun changement pour ${config.username}`);
+        }
+
+      } catch (error) {
+        totalErrors++;
+        logger.error(`❌ Erreur mise à jour portefeuille ${config.username} dans ${channelId}:`, error);
+      }
+
+      // Délai entre chaque portefeuille
+      await this.sleep(2000);
+    }
+
+    logger.info(`🔄 Mise à jour hebdomadaire terminée: ${totalUpdated} portefeuille(s) mis à jour, ${totalErrors} erreur(s)`);
+  }
+
+  async sendPortfolioUpdateNotification(channelId, config, clubsAdded, clubsRemoved) {
+    try {
+      const channel = this.client.channels.cache.get(channelId);
+      if (!channel) return;
+
+      const embed = new EmbedBuilder()
+        .setColor('#5865f2')
+        .setTitle('🔄 Mise à jour hebdomadaire du portefeuille')
+        .setDescription(`Votre portefeuille **${config.username}** a été mis à jour automatiquement.`)
+        .addFields({
+          name: '⚙️ Configuration',
+          value: `**Seuil minimum:** ${config.minInfluence} parts\n**Total clubs suivis:** ${config.clubs.length}`,
+          inline: false
+        });
+
+      if (clubsAdded.length > 0) {
+        const addedNames = clubsAdded
+          .slice(0, 10)
+          .map(c => `• ${this.apiClient.getClubName(c.club_id)} (${c.num.toLocaleString()} parts)`)
+          .join('\n');
+
+        embed.addFields({
+          name: `➕ Clubs ajoutés (${clubsAdded.length})`,
+          value: clubsAdded.length > 10
+            ? `${addedNames}\n*... et ${clubsAdded.length - 10} autres*`
+            : addedNames,
+          inline: false
+        });
+      }
+
+      if (clubsRemoved.length > 0) {
+        const removedNames = clubsRemoved
+          .slice(0, 10)
+          .map(c => `• ${this.apiClient.getClubName(c.club_id)}`)
+          .join('\n');
+
+        embed.addFields({
+          name: `➖ Clubs retirés (${clubsRemoved.length})`,
+          value: clubsRemoved.length > 10
+            ? `${removedNames}\n*... et ${clubsRemoved.length - 10} autres*`
+            : removedNames,
+          inline: false
+        });
+      }
+
+      embed.addFields({
+        name: '💡 Informations',
+        value:
+          '• Les clubs ajoutés ont dépassé votre seuil minimum\n' +
+          '• Les clubs retirés sont maintenant en-dessous du seuil\n' +
+          '• La surveillance continue automatiquement\n' +
+          '• Prochaine mise à jour: dimanche prochain à 2h00',
+        inline: false
+      })
+      .setFooter({ text: 'Mise à jour automatique hebdomadaire • Soccerverse Bot v3.0' })
+      .setTimestamp();
+
+      await channel.send({
+        content: config.startedBy ? `<@${config.startedBy}>` : undefined,
+        embeds: [embed]
+      });
+
+      logger.info(`📨 Notification de mise à jour envoyée à ${config.username} dans ${channelId}`);
+
+    } catch (error) {
+      logger.error('❌ Erreur envoi notification mise à jour:', error);
+    }
+  }
+
   // =================== ROTATION & MONITORING ===================
 
   startRotation() {
@@ -381,7 +535,21 @@ class ClubFollowerWatcher {
       }
     }, 5 * 60 * 1000);
 
+    // 🔄 Mise à jour hebdomadaire des portefeuilles (dimanche à 2h)
+    cron.schedule('0 2 * * 0', async () => {
+      try {
+        logger.info('🔄 Mise à jour hebdomadaire automatique des portefeuilles...');
+        await this.refreshAllPortfolios();
+      } catch (error) {
+        logger.error('❌ Erreur mise à jour hebdomadaire:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "Europe/Paris"
+    });
+
     logger.info('📊 Rotation de surveillance des clubs démarrée (3 minutes par club)');
+    logger.info('⏰ Mise à jour automatique des portefeuilles programmée: dimanche 2h00');
   }
 
   async checkNextClubs() {
