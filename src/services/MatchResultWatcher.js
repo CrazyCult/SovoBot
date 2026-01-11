@@ -97,10 +97,18 @@ class MatchResultWatcher {
       logger.debug(`⚽ Vérification résultats pour ${registeredClubs.length} club(s)`);
       
       const clubsToCheck = [];
-      
+
       for (const clubId of registeredClubs) {
+        const clubIdNum = parseInt(clubId);
+
+        // Ignorer les IDs invalides
+        if (isNaN(clubIdNum) || clubIdNum <= 0) {
+          logger.warn(`⚠️ ID de club invalide ignoré dans MatchResultWatcher: "${clubId}"`);
+          continue;
+        }
+
         clubsToCheck.push({
-          clubId: parseInt(clubId),
+          clubId: clubIdNum,
           delay: clubsToCheck.length * this.notificationDelay
         });
       }
