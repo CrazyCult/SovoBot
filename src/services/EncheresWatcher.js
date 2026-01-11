@@ -246,7 +246,7 @@ class EncheresWatcher {
 
       // Tenter de récupérer les détails finaux confirmés de l'API
       try {
-        const finalDetails = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
+        const transferHistory = await this.apiClient.makeRpcRequest('get_player_transfer_history', {
           player_id: auction.player_id
         });
 
