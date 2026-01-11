@@ -134,12 +134,28 @@ class ClubNewsWatcher {
         season_id: this.defaultSeasonId
       });
 
-      if (!result || !result.data) {
+      // 🔥 CORRECTION CRITIQUE: L'API retourne directement un array dans result, pas result.data
+      let messages = [];
+
+      if (!result) {
         logger.debug(`📰 Aucune donnée d'actualités pour le club ${clubId}`);
         return;
       }
 
-      const messages = result.data;
+      // La réponse peut être soit directement un array, soit un objet avec .data
+      if (Array.isArray(result)) {
+        messages = result;
+      } else if (result.data && Array.isArray(result.data)) {
+        messages = result.data;
+      } else {
+        logger.debug(`📰 Format de réponse inattendu pour le club ${clubId}`);
+        return;
+      }
+
+      if (messages.length === 0) {
+        logger.debug(`📰 Aucun message d'actualités pour le club ${clubId}`);
+        return;
+      }
 
       // Trier par date (ordre chronologique)
       messages.sort((a, b) => a.date - b.date);
