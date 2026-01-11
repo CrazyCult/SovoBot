@@ -29,25 +29,25 @@ class MatchResultWatcher {
   loadProcessedMatches() {
     try {
       const settings = this.dataManager.getChannelSettings('_global_results');
-      
+
       if (settings && settings.processedMatches) {
         const map = new Map();
-        const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000); // 🔥 7 jours au lieu de 1
-        
+        const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000); // 🔥 60 jours pour éviter les doublons après longue période
+
         // Charger tous les matchs récents
         for (const [key, data] of Object.entries(settings.processedMatches)) {
-          if (data.timestamp > sevenDaysAgo) {
+          if (data.timestamp > sixtyDaysAgo) {
             map.set(key, data);
           }
         }
-        
-        logger.info(`📦 ${map.size} match(s) déjà traité(s) chargé(s) depuis le cache (7 derniers jours)`);
+
+        logger.info(`📦 ${map.size} match(s) déjà traité(s) chargé(s) depuis le cache (60 derniers jours)`);
         return map;
       }
     } catch (error) {
       logger.warn('⚠️ Impossible de charger le cache des matchs:', error.message);
     }
-    
+
     return new Map();
   }
 
@@ -133,25 +133,46 @@ class MatchResultWatcher {
   async checkClubRecentResult(clubId) {
     try {
       const lastMatch = await this.apiClient.getClubLastMatch(clubId);
-      
+
       if (!lastMatch) {
         return;
       }
-      
+
       // 🔥 CORRECTION CRITIQUE: Générer une clé robuste
       const matchKey = this.generateMatchKey(clubId, lastMatch);
-      
+
       // 🔥 VÉRIFICATION IMMÉDIATE: Si déjà traité, STOP !
       if (this.processedMatches.has(matchKey)) {
         logger.debug(`✅ Match ${matchKey} déjà notifié, skip`);
         return;
       }
-      
+
       const matchTime = new Date(lastMatch.date * 1000);
       const now = new Date();
       const timeSinceMatch = now.getTime() - matchTime.getTime();
       const minDelay = this.firstAttemptDelay;
       const maxDelay = 2 * 60 * 1000;
+
+      // 🔥 NOUVELLE VÉRIFICATION: Ne pas notifier les matchs de plus de 7 jours
+      // Cela évite de re-notifier de vieux matchs si le cache a été perdu/nettoyé
+      const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
+      if (timeSinceMatch > sevenDaysInMs) {
+        logger.debug(`⏭️ Match ${matchKey} trop ancien (${Math.round(timeSinceMatch / (24 * 60 * 60 * 1000))} jours), skip notification mais ajout au cache`);
+        // Ajouter au cache pour éviter de revérifier ce match
+        this.processedMatches.set(matchKey, {
+          timestamp: Date.now(),
+          clubId: clubId,
+          matchData: {
+            date: lastMatch.date,
+            home_club: lastMatch.home_club,
+            away_club: lastMatch.away_club,
+            home_goals: lastMatch.home_goals,
+            away_goals: lastMatch.away_goals
+          }
+        });
+        await this.saveProcessedMatches();
+        return;
+      }
       
       if (timeSinceMatch < minDelay) {
         return;
@@ -519,31 +540,31 @@ class MatchResultWatcher {
   }
 
   cleanupProcessedMatches() {
-    // 🔥 CORRECTION: 7 jours au lieu de 24h
-    const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    // 🔥 CORRECTION: 60 jours pour éviter les doublons après longue période d'inactivité
+    const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000);
     let cleanedCount = 0;
-    
+
     for (const [key, matchData] of this.processedMatches.entries()) {
-      if (matchData.timestamp < sevenDaysAgo) {
+      if (matchData.timestamp < sixtyDaysAgo) {
         this.processedMatches.delete(key);
         cleanedCount++;
       }
     }
-    
+
     if (cleanedCount > 0) {
       this.saveProcessedMatches().catch(err => {
         logger.error('Erreur sauvegarde après nettoyage:', err);
       });
-      logger.info(`🧹 Cache nettoyé: ${cleanedCount} match(s) ancien(s) supprimé(s) (>7 jours)`);
+      logger.info(`🧹 Cache nettoyé: ${cleanedCount} match(s) ancien(s) supprimé(s) (>60 jours)`);
     }
-    
+
     const oneHourAgo = Date.now() - (60 * 60 * 1000);
     for (const [key, attemptData] of this.matchAttempts.entries()) {
       if (attemptData.lastAttempt < oneHourAgo) {
         this.matchAttempts.delete(key);
       }
     }
-    
+
     logger.debug(`🧹 Nettoyage: ${this.processedMatches.size} matchs traités, ${this.matchAttempts.size} matchs en cours`);
   }
 

@@ -233,10 +233,10 @@ class EncheresWatcher {
     try {
       const channel = this.client.channels.cache.get(channelId);
       if (!channel) return;
-      
+
       const settings = this.dataManager.getChannelSettings(channelId);
       const startedBy = settings.encheresWatching?.startedBy;
-      
+
       const playerName = this.apiClient.getPlayerName(auction.player_id);
 
       // 🔥 CORRECTION: Utiliser les infos de l'enchère comme valeurs par défaut
@@ -244,36 +244,31 @@ class EncheresWatcher {
       let finalPrice = auction.highest_bid || 0;
       let winnerClubId = auction.highest_bidder;
 
-      // 🔥 NOUVELLE API: Récupérer l'historique des transferts du joueur (données réelles post-transfert)
+      // Tenter de récupérer les détails finaux confirmés de l'API
       try {
         const transferHistory = await this.apiClient.makeRpcRequest('get_player_transfer_history', {
           player_id: auction.player_id
         });
 
-        // Le transfert le plus récent est le premier dans le tableau
-        if (transferHistory && Array.isArray(transferHistory) && transferHistory.length > 0) {
-          const latestTransfer = transferHistory[0];
+        // 🔥 CORRECTION: Vérifier les deux structures de réponse possibles
+        let detailData = null;
+        if (finalDetails && finalDetails.data) {
+          detailData = finalDetails.data;
+        } else if (finalDetails && finalDetails.high_bid !== undefined) {
+          detailData = finalDetails;
+        }
 
-          // Vérifier que c'est un transfert récent (moins de 5 minutes)
-          const transferDate = new Date(latestTransfer.date * 1000);
-          const now = new Date();
-          const diffMinutes = (now - transferDate) / (1000 * 60);
-
-          if (diffMinutes < 5 && latestTransfer.club_id_to && latestTransfer.amount) {
-            winnerClubId = latestTransfer.club_id_to;
-            winnerName = this.apiClient.getClubName(winnerClubId);
-            finalPrice = latestTransfer.amount;
-            logger.info(`✅ Transfert réel confirmé pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
-          } else {
-            logger.debug(`⚠️ Transfert trouvé mais trop ancien (${Math.round(diffMinutes)} min), utilisation données d'enchère`);
-          }
-        } else {
-          logger.debug(`⚠️ Aucun historique de transfert trouvé pour ${playerName}, utilisation données d'enchère`);
+        // Si on a des détails avec high_bid, les utiliser
+        if (detailData && detailData.high_bid) {
+          winnerClubId = detailData.high_bid.club_id;
+          winnerName = this.apiClient.getClubName(winnerClubId);
+          finalPrice = detailData.high_bid.amount;
+          logger.debug(`✅ Détails finaux confirmés pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
         }
       } catch (error) {
-        logger.debug(`⚠️ Impossible de récupérer l'historique des transferts pour ${playerName}:`, error.message);
+        logger.debug(`⚠️ Utilisation des données d'enchère pour ${playerName} (API indisponible)`);
       }
-      
+
       const embed = new EmbedBuilder()
         .setColor('#4CAF50')
         .setTitle('🏁 Enchère Terminée !')
@@ -301,21 +296,21 @@ class EncheresWatcher {
             inline: false
           }
         )
-        .setFooter({ 
-          text: 'Surveillance automatique terminée • Soccerverse Bot v3.0' 
+        .setFooter({
+          text: 'Surveillance automatique terminée • Soccerverse Bot v3.0'
         })
         .setTimestamp();
 
       // ✅ VRAIE NOTIFICATION - Mention dans content
       const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
 
-      await channel.send({ 
+      await channel.send({
         content: mentionContent, // 🔔 Badge rouge !
-        embeds: [embed] 
+        embeds: [embed]
       });
-      
+
       logger.info(`🏁 Notification fin enchère envoyée: ${playerName} → ${winnerName} (${this.formatCurrency(finalPrice)})`);
-      
+
     } catch (error) {
       logger.error('Erreur envoi notification fin enchère:', error);
     }
