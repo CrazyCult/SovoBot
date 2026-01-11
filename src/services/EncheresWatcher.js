@@ -523,7 +523,7 @@ class EncheresWatcher {
           },
           {
             name: '🔗 Action',
-            value: `[Enchérir maintenant](https://play.soccerverse.com/transfers)`,
+            value: `[Enchérir maintenant](https://play.soccerverse.com/transferMarket)`,
             inline: true
           }
         )
