@@ -233,30 +233,42 @@ class EncheresWatcher {
     try {
       const channel = this.client.channels.cache.get(channelId);
       if (!channel) return;
-      
+
       const settings = this.dataManager.getChannelSettings(channelId);
       const startedBy = settings.encheresWatching?.startedBy;
-      
+
       const playerName = this.apiClient.getPlayerName(auction.player_id);
-      
-      let winnerName = 'Inconnu';
+
+      // 🔥 CORRECTION: Utiliser les infos de l'enchère comme valeurs par défaut
+      let winnerName = this.apiClient.getClubName(auction.highest_bidder);
       let finalPrice = auction.highest_bid || 0;
-      
+      let winnerClubId = auction.highest_bidder;
+
+      // Tenter de récupérer les détails finaux confirmés de l'API
       try {
         const finalDetails = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
           player_id: auction.player_id
         });
-        
+
+        // 🔥 CORRECTION: Vérifier les deux structures de réponse possibles
+        let detailData = null;
         if (finalDetails && finalDetails.data) {
-          if (finalDetails.data.high_bid) {
-            winnerName = this.apiClient.getClubName(finalDetails.data.high_bid.club_id);
-            finalPrice = finalDetails.data.high_bid.amount;
-          }
+          detailData = finalDetails.data;
+        } else if (finalDetails && finalDetails.high_bid !== undefined) {
+          detailData = finalDetails;
+        }
+
+        // Si on a des détails avec high_bid, les utiliser
+        if (detailData && detailData.high_bid) {
+          winnerClubId = detailData.high_bid.club_id;
+          winnerName = this.apiClient.getClubName(winnerClubId);
+          finalPrice = detailData.high_bid.amount;
+          logger.debug(`✅ Détails finaux confirmés pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
         }
       } catch (error) {
-        logger.debug(`Impossible de récupérer les détails finaux pour ${playerName}`);
+        logger.debug(`⚠️ Utilisation des données d'enchère pour ${playerName} (API indisponible)`);
       }
-      
+
       const embed = new EmbedBuilder()
         .setColor('#4CAF50')
         .setTitle('🏁 Enchère Terminée !')
@@ -284,21 +296,21 @@ class EncheresWatcher {
             inline: false
           }
         )
-        .setFooter({ 
-          text: 'Surveillance automatique terminée • Soccerverse Bot v3.0' 
+        .setFooter({
+          text: 'Surveillance automatique terminée • Soccerverse Bot v3.0'
         })
         .setTimestamp();
 
       // ✅ VRAIE NOTIFICATION - Mention dans content
       const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
 
-      await channel.send({ 
+      await channel.send({
         content: mentionContent, // 🔔 Badge rouge !
-        embeds: [embed] 
+        embeds: [embed]
       });
-      
-      logger.info(`🏁 Notification fin enchère envoyée: ${playerName} → ${winnerName}`);
-      
+
+      logger.info(`🏁 Notification fin enchère envoyée: ${playerName} → ${winnerName} (${this.formatCurrency(finalPrice)})`);
+
     } catch (error) {
       logger.error('Erreur envoi notification fin enchère:', error);
     }
