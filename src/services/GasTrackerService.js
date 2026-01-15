@@ -5,18 +5,18 @@ class GasTrackerService {
   constructor(client, dataManager) {
     this.client = client;
     this.dataManager = dataManager;
-
+    
     // Configuration API Etherscan
     this.apiKey = process.env.ETHERSCAN_API_KEY;
     this.apiUrl = 'https://api.etherscan.io/v2/api';
-
+    
     // Intervalle de mise à jour (10 minutes pour respecter les rate limits Discord)
     this.updateInterval = 10 * 60 * 1000;
-
+    
     // Cache du dernier prix
     this.lastGasPrice = null;
     this.lastUpdate = null;
-
+    
     // Statistiques
     this.stats = {
       totalUpdates: 0,
@@ -24,7 +24,7 @@ class GasTrackerService {
       apiErrors: 0,
       discordErrors: 0
     };
-
+    
     logger.info('⛽ Service Gas Tracker Polygon initialisé');
   }
 
@@ -36,12 +36,12 @@ class GasTrackerService {
     setTimeout(() => {
       this.updateAllChannels();
     }, 30000);
-
+    
     // Puis mise à jour toutes les 10 minutes
     setInterval(() => {
       this.updateAllChannels();
     }, this.updateInterval);
-
+    
     logger.info('⛽ Surveillance du gas Polygon démarrée (mise à jour toutes les 10 minutes)');
   }
 
@@ -59,18 +59,18 @@ class GasTrackerService {
         },
         timeout: 10000
       });
-
+      
       if (response.data.status === '1' && response.data.result) {
         const result = response.data.result;
-
+        
         // Utiliser ProposeGasPrice (prix recommandé)
         const gasPrice = parseFloat(result.ProposeGasPrice);
-
+        
         this.lastGasPrice = gasPrice;
         this.lastUpdate = Date.now();
-
+        
         logger.debug(`⛽ Prix du gas Polygon: ${gasPrice} Gwei`);
-
+        
         return {
           gasPrice: gasPrice,
           safeGasPrice: parseFloat(result.SafeGasPrice),
@@ -80,7 +80,7 @@ class GasTrackerService {
       } else {
         throw new Error('Réponse API invalide');
       }
-
+      
     } catch (error) {
       this.stats.apiErrors++;
       logger.error('❌ Erreur récupération prix du gas:', error.message);
@@ -95,19 +95,31 @@ class GasTrackerService {
     try {
       const gasData = await this.fetchGasPrice();
       const gasPrice = gasData.gasPrice;
-
+      
+      // Vérifier que channelSettings existe
+      if (!this.dataManager.data.channelSettings) {
+        logger.debug('⚠️ Aucun channelSettings trouvé, skip mise à jour');
+        return;
+      }
+      
       // Parcourir tous les serveurs et salons configurés
+      let updatedCount = 0;
       for (const [channelId, settings] of this.dataManager.data.channelSettings.entries()) {
         if (settings.gasTracking && settings.gasTracking.enabled) {
-          await this.updateChannel(channelId, gasPrice);
+          const success = await this.updateChannel(channelId, gasPrice);
+          if (success) updatedCount++;
         }
       }
-
+      
+      if (updatedCount > 0) {
+        logger.info(`⛽ ${updatedCount} salon(s) mis à jour avec le gas: ${Math.round(gasPrice)} Gwei`);
+      }
+      
       this.stats.totalUpdates++;
       this.stats.successfulUpdates++;
-
+      
     } catch (error) {
-      logger.error('❌ Erreur mise à jour globale gas:', error);
+      logger.error('❌ Erreur mise à jour globale gas:', error.message);
     }
   }
 
@@ -117,18 +129,18 @@ class GasTrackerService {
   async updateChannel(channelId, gasPrice) {
     try {
       const channel = await this.client.channels.fetch(channelId);
-
+      
       if (!channel) {
         logger.warn(`⚠️ Salon ${channelId} introuvable pour mise à jour gas`);
         return false;
       }
-
+      
       // Format du nom personnalisable
       const settings = this.dataManager.getChannelSettings(channelId);
       const format = settings.gasTracking?.format || '⛽│Gas: {price} Gwei';
-
+      
       const newName = format.replace('{price}', Math.round(gasPrice));
-
+      
       // Vérifier si le nom a changé (évite les requêtes inutiles)
       if (channel.name !== newName) {
         await channel.setName(newName, 'Mise à jour automatique du prix du gas Polygon');
@@ -138,10 +150,10 @@ class GasTrackerService {
         logger.debug(`ℹ️ Pas de changement nécessaire pour ${channel.name}`);
         return false;
       }
-
+      
     } catch (error) {
       this.stats.discordErrors++;
-
+      
       if (error.code === 50013) {
         logger.error(`❌ Permissions insuffisantes pour modifier le salon ${channelId}`);
       } else if (error.code === 50035) {
@@ -149,7 +161,7 @@ class GasTrackerService {
       } else {
         logger.error(`❌ Erreur mise à jour salon ${channelId}:`, error.message);
       }
-
+      
       return false;
     }
   }
@@ -159,17 +171,17 @@ class GasTrackerService {
    */
   enableTracking(channelId, format = '⛽│Gas: {price} Gwei') {
     const settings = this.dataManager.getChannelSettings(channelId);
-
+    
     if (!settings.gasTracking) {
       settings.gasTracking = {};
     }
-
+    
     settings.gasTracking.enabled = true;
     settings.gasTracking.format = format;
     settings.gasTracking.enabledAt = Date.now();
-
+    
     logger.info(`✅ Tracking gas activé pour le salon ${channelId}`);
-
+    
     // Mise à jour immédiate
     if (this.lastGasPrice) {
       this.updateChannel(channelId, this.lastGasPrice);
@@ -181,7 +193,7 @@ class GasTrackerService {
    */
   disableTracking(channelId) {
     const settings = this.dataManager.getChannelSettings(channelId);
-
+    
     if (settings.gasTracking) {
       settings.gasTracking.enabled = false;
       logger.info(`🛑 Tracking gas désactivé pour le salon ${channelId}`);
@@ -193,7 +205,19 @@ class GasTrackerService {
    */
   getStatus() {
     const enabledChannels = [];
-
+    
+    // Vérifier que channelSettings existe
+    if (!this.dataManager.data.channelSettings) {
+      return {
+        enabled: false,
+        channelCount: 0,
+        channels: [],
+        lastGasPrice: this.lastGasPrice,
+        lastUpdate: this.lastUpdate,
+        stats: this.stats
+      };
+    }
+    
     for (const [channelId, settings] of this.dataManager.data.channelSettings.entries()) {
       if (settings.gasTracking && settings.gasTracking.enabled) {
         enabledChannels.push({
@@ -203,7 +227,7 @@ class GasTrackerService {
         });
       }
     }
-
+    
     return {
       enabled: enabledChannels.length > 0,
       channelCount: enabledChannels.length,
