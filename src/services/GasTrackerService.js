@@ -10,8 +10,8 @@ class GasTrackerService {
     this.apiKey = process.env.ETHERSCAN_API_KEY;
     this.apiUrl = 'https://api.etherscan.io/v2/api';
     
-    // Intervalle de mise à jour (10 minutes pour respecter les rate limits Discord)
-    this.updateInterval = 10 * 60 * 1000;
+    // Intervalle de mise à jour ( 5 minutes pour respecter les rate limits Discord)
+    this.updateInterval = 5 * 60 * 1000;
     
     // Cache du dernier prix
     this.lastGasPrice = null;
