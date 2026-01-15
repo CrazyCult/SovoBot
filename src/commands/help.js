@@ -25,13 +25,23 @@ module.exports = {
         },
         {
           name: '🏆 Surveillance des Enchères',
-          value: 
+          value:
             '**`!encheres`** - Démarrer surveillance pour clubs inscrits\n' +
             '**`!encheres <player_id>`** - Ajouter un joueur à surveiller\n' +
             '**`!encheres <player_id> remove`** - Retirer un joueur de la surveillance\n' +
             '**`!encheres stop`** - Arrêter toutes les surveillances\n' +
             '**`!encheres status`** - Voir le statut de la surveillance\n' +
             '**`!encheres list`** - Voir les clubs/joueurs surveillés',
+          inline: false
+        },
+        {
+          name: '⛽ Surveillance du Gas Polygon',
+          value:
+            '**`!gastracker start`** - Activer la surveillance du gas dans ce salon\n' +
+            '**`!gastracker stop`** - Arrêter la surveillance\n' +
+            '**`!gastracker status`** - Voir le statut actuel\n' +
+            '**`!gastracker format <format>`** - Personnaliser l\'affichage\n' +
+            '**`!gastracker update`** - Forcer une mise à jour',
           inline: false
         },
         {

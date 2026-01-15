@@ -11,6 +11,7 @@ const MatchResultWatcher = require('./src/services/MatchResultWatcher');
 const PolygonStalkerService = require('./src/services/PolygonStalkerService');
 const EncheresWatcher = require('./src/services/EncheresWatcher');
 const ClubNewsWatcher = require('./src/services/ClubNewsWatcher');
+const GasTrackerService = require('./src/services/GasTrackerService');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -40,6 +41,7 @@ class SoccerverseBot {
     this.polygonStalkerService = null;
     this.encheresWatcher = null;
     this.clubNewsWatcher = null;
+    this.gasTrackerService = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -102,6 +104,11 @@ class SoccerverseBot {
       // Initialiser le service de surveillance des actualités du club
       this.clubNewsWatcher = new ClubNewsWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('📰 Service de surveillance des actualités du club initialisé');
+
+      // Initialiser le service Gas Tracker
+      this.gasTrackerService = new GasTrackerService(this.client, this.dataManager);
+      this.gasTrackerService.start();
+      logger.info('⛽ Service Gas Tracker Polygon démarré');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -129,7 +136,8 @@ class SoccerverseBot {
           matchResultWatcher: this.matchResultWatcher,
           polygonStalkerService: this.polygonStalkerService,
           encheresWatcher: this.encheresWatcher,
-          clubNewsWatcher: this.clubNewsWatcher
+          clubNewsWatcher: this.clubNewsWatcher,
+          gasTrackerService: this.gasTrackerService
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -311,7 +319,8 @@ class SoccerverseBot {
               matchResultWatcher: this.matchResultWatcher,
               polygonStalkerService: this.polygonStalkerService,
               encheresWatcher: this.encheresWatcher,
-              clubNewsWatcher: this.clubNewsWatcher
+              clubNewsWatcher: this.clubNewsWatcher,
+              gasTrackerService: this.gasTrackerService
             });
           }
         } catch (error) {
@@ -385,7 +394,8 @@ class SoccerverseBot {
               matchResultWatcher: this.matchResultWatcher,
               polygonStalkerService: this.polygonStalkerService,
               encheresWatcher: this.encheresWatcher,
-              clubNewsWatcher: this.clubNewsWatcher
+              clubNewsWatcher: this.clubNewsWatcher,
+              gasTrackerService: this.gasTrackerService
             });
           }
         } catch (error) {
@@ -489,7 +499,8 @@ class SoccerverseBot {
               matchResultWatcher: this.matchResultWatcher,
               polygonStalkerService: this.polygonStalkerService,
               encheresWatcher: this.encheresWatcher,
-              clubNewsWatcher: this.clubNewsWatcher
+              clubNewsWatcher: this.clubNewsWatcher,
+              gasTrackerService: this.gasTrackerService
             });
           }
         } catch (error) {
