@@ -7,7 +7,7 @@ class DataManager {
     this.dataFile = path.join(__dirname, '..', '..', 'data', 'bot_data.json');
     this.data = {
       registrations: new Map(), // channelId -> Map(clubId -> {clubId, registeredBy, registeredAt})
-      settings: new Map(),      // channelId -> settings object
+      channelSettings: new Map(), // channelId -> settings object (RENOMMÉ pour cohérence)
       completedCompositions: new Map() // `${clubId}_${matchDate}` -> {clubId, matchDate, completedAt, completedBy}
     };
   }
@@ -56,9 +56,11 @@ class DataManager {
         }
       }
       
-      if (jsonData.settings) {
-        for (const [channelId, settings] of Object.entries(jsonData.settings)) {
-          this.data.settings.set(channelId, settings);
+      // Support ancien nom "settings" et nouveau nom "channelSettings"
+      const settingsData = jsonData.channelSettings || jsonData.settings;
+      if (settingsData) {
+        for (const [channelId, settings] of Object.entries(settingsData)) {
+          this.data.channelSettings.set(channelId, settings);
         }
       }
 
@@ -82,7 +84,7 @@ class DataManager {
     try {
       const jsonData = {
         registrations: {},
-        settings: {},
+        channelSettings: {}, // RENOMMÉ pour cohérence
         completedCompositions: {},
         lastSaved: new Date().toISOString()
       };
@@ -94,8 +96,8 @@ class DataManager {
         }
       }
       
-      for (const [channelId, settings] of this.data.settings.entries()) {
-        jsonData.settings[channelId] = settings;
+      for (const [channelId, settings] of this.data.channelSettings.entries()) {
+        jsonData.channelSettings[channelId] = settings;
       }
 
       for (const [key, data] of this.data.completedCompositions.entries()) {
@@ -205,15 +207,30 @@ class DataManager {
   // =================== PARAMÈTRES DES CANAUX ===================
   
   getChannelSettings(channelId) {
-    return this.data.settings.get(channelId) || {
-      notifications: true,
-      language: 'fr',
-      timezone: 'Europe/Paris'
-    };
+    // Initialiser channelSettings si nécessaire
+    if (!this.data.channelSettings) {
+      this.data.channelSettings = new Map();
+    }
+    
+    // Récupérer ou créer les settings pour ce canal
+    if (!this.data.channelSettings.has(channelId)) {
+      this.data.channelSettings.set(channelId, {
+        notifications: true,
+        language: 'fr',
+        timezone: 'Europe/Paris'
+      });
+    }
+    
+    return this.data.channelSettings.get(channelId);
   }
   
   setChannelSettings(channelId, settings) {
-    this.data.settings.set(channelId, {
+    // Initialiser channelSettings si nécessaire
+    if (!this.data.channelSettings) {
+      this.data.channelSettings = new Map();
+    }
+    
+    this.data.channelSettings.set(channelId, {
       ...this.getChannelSettings(channelId),
       ...settings
     });
