@@ -37,7 +37,7 @@ class GasTrackerService {
       this.updateAllChannels();
     }, 30000);
     
-    // Puis mise à jour toutes les 10 minutes
+    // Puis mise à jour toutes les 5 minutes
     setInterval(() => {
       this.updateAllChannels();
     }, this.updateInterval);
