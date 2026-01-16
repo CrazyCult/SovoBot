@@ -6,50 +6,89 @@ module.exports = {
   usage: '!salaire <club_id>',
   
   async execute(message, args, { apiClient, dataManager }) {
-    // Vérifier qu'un ID de club est fourni
+    const channelId = message.channel.id;
+    let clubId;
+
+    // Si aucun argument, utiliser les clubs enregistrés
     if (args.length === 0) {
-      const embed = new EmbedBuilder()
-        .setColor('#FFA500')
-        .setTitle('💰 Calculateur de Salaire Cible')
-        .setDescription('Calculez le salaire club/match recommandé selon votre position dans la ligue.')
-        .addFields(
-          {
-            name: '💡 Usage',
-            value: '`!salaire <club_id>`',
-            inline: false
-          },
-          {
-            name: '📝 Exemple',
-            value: '`!salaire 3227`',
-            inline: false
-          },
-          {
-            name: '📊 Informations affichées',
-            value: 
-              '• Salaire cible pour votre position actuelle\n' +
-              '• Salaire pour le 1er du classement\n' +
-              '• Salaire pour le milieu de tableau\n' +
-              '• Salaire pour le dernier du classement',
-            inline: false
-          }
-        )
-        .setFooter({ text: 'Soccerverse Bot v3.0' });
+      const registeredClubs = dataManager.getChannelClubs(channelId);
       
-      await message.reply({ embeds: [embed] });
-      return;
-    }
+      if (registeredClubs.length === 0) {
+        const embed = new EmbedBuilder()
+          .setColor('#FFA500')
+          .setTitle('💰 Aucun club inscrit')
+          .setDescription('Ce salon n\'a aucun club inscrit aux notifications.')
+          .addFields(
+            {
+              name: '💡 Usage',
+              value: '• `!salaire` - Salaires du club inscrit\n• `!salaire <club_id>` - Salaires d\'un club spécifique',
+              inline: false
+            },
+            {
+              name: '📝 Exemple',
+              value: '`!salaire 3227`',
+              inline: false
+            },
+            {
+              name: '📊 Informations affichées',
+              value: 
+                '• Salaire cible pour votre position actuelle\n' +
+                '• Salaire pour le 1er du classement\n' +
+                '• Salaire pour le milieu de tableau\n' +
+                '• Salaire pour le dernier du classement',
+              inline: false
+            },
+            {
+              name: '📝 Pour s\'inscrire',
+              value: '`!inscription <club_id>`',
+              inline: false
+            }
+          )
+          .setFooter({ text: 'Soccerverse Bot v3.0' });
+        
+        await message.reply({ embeds: [embed] });
+        return;
+      }
 
-    const clubId = parseInt(args[0]);
-
-    if (isNaN(clubId)) {
-      const embed = new EmbedBuilder()
-        .setColor('#FF6B6B')
-        .setTitle('❌ ID invalide')
-        .setDescription('Veuillez fournir un ID de club valide (nombre).')
-        .setFooter({ text: 'Exemple: !salaire 3227' });
+      // Si plusieurs clubs inscrits, prendre le premier
+      clubId = parseInt(registeredClubs[0]);
       
-      await message.reply({ embeds: [embed] });
-      return;
+      // Si plus d'un club inscrit, afficher un message informatif
+      if (registeredClubs.length > 1) {
+        const clubNames = [];
+        for (const id of registeredClubs.slice(0, 3)) {
+          clubNames.push(apiClient.getClubName(parseInt(id)));
+        }
+        
+        const infoEmbed = new EmbedBuilder()
+          .setColor('#2196F3')
+          .setTitle('📋 Plusieurs clubs inscrits')
+          .setDescription(`Calcul des salaires pour **${apiClient.getClubName(clubId)}** (premier club inscrit).`)
+          .addFields({
+            name: '🏟️ Clubs inscrits dans ce salon',
+            value: clubNames.join(', ') + (registeredClubs.length > 3 ? ` et ${registeredClubs.length - 3} autre(s)` : '')
+          })
+          .addFields({
+            name: '💡 Pour un autre club',
+            value: '`!salaire <club_id>`'
+          })
+          .setFooter({ text: 'Soccerverse Bot v3.0' });
+        
+        await message.reply({ embeds: [infoEmbed] });
+      }
+    } else {
+      clubId = parseInt(args[0]);
+
+      if (isNaN(clubId)) {
+        const embed = new EmbedBuilder()
+          .setColor('#FF6B6B')
+          .setTitle('❌ ID invalide')
+          .setDescription('Veuillez fournir un ID de club valide (nombre).')
+          .setFooter({ text: 'Exemple: !salaire 3227' });
+        
+        await message.reply({ embeds: [embed] });
+        return;
+      }
     }
 
     // Message de chargement
