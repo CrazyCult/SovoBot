@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 
 module.exports = {
   name: 'help',
@@ -138,7 +138,9 @@ module.exports = {
       .setTimestamp();
 
     // Ajouter les statistiques et commandes admin si admin
-    if (message.member && message.member.permissions.has('ADMINISTRATOR')) {
+    const isAdmin = message.member?.permissions?.has(PermissionFlagsBits.Administrator) || false;
+    
+    if (isAdmin) {
       // Section commandes admin
       embed.addFields({
         name: '⚙️ Commandes Admin (Cachées)',
