@@ -239,18 +239,19 @@ class EncheresWatcher {
 
       const playerName = this.apiClient.getPlayerName(auction.player_id);
 
-      // 🔥 CORRECTION: Utiliser les infos de l'enchère comme valeurs par défaut
+      // Valeurs par défaut
       let winnerName = this.apiClient.getClubName(auction.highest_bidder);
       let finalPrice = auction.highest_bid || 0;
       let winnerClubId = auction.highest_bidder;
 
-      // Tenter de récupérer les détails finaux confirmés de l'API
+      // 🔥 CORRECTION: Récupérer les détails finaux depuis l'API
       try {
-        const transferHistory = await this.apiClient.makeRpcRequest('get_player_transfer_history', {
+        // Option 1: Récupérer les détails de l'enchère
+        const finalDetails = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
           player_id: auction.player_id
         });
 
-        // 🔥 CORRECTION: Vérifier les deux structures de réponse possibles
+        // Vérifier les deux structures de réponse possibles
         let detailData = null;
         if (finalDetails && finalDetails.data) {
           detailData = finalDetails.data;
@@ -264,9 +265,25 @@ class EncheresWatcher {
           winnerName = this.apiClient.getClubName(winnerClubId);
           finalPrice = detailData.high_bid.amount;
           logger.debug(`✅ Détails finaux confirmés pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
+        } else {
+          // Option 2: Essayer avec l'historique de transfert si pas de high_bid
+          logger.debug(`⚠️ Pas de high_bid, essai avec l'historique de transfert pour ${playerName}`);
+          
+          const transferHistory = await this.apiClient.makeRpcRequest('get_player_transfer_history', {
+            player_id: auction.player_id
+          });
+
+          // Récupérer le dernier transfert (le plus récent)
+          if (transferHistory && Array.isArray(transferHistory) && transferHistory.length > 0) {
+            const lastTransfer = transferHistory[0];
+            winnerClubId = lastTransfer.new_club_id;
+            winnerName = this.apiClient.getClubName(winnerClubId);
+            finalPrice = lastTransfer.price;
+            logger.debug(`✅ Infos récupérées via historique pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
+          }
         }
       } catch (error) {
-        logger.debug(`⚠️ Utilisation des données d'enchère pour ${playerName} (API indisponible)`);
+        logger.debug(`⚠️ Utilisation des données d'enchère pour ${playerName} (API indisponible): ${error.message}`);
       }
 
       const embed = new EmbedBuilder()
@@ -301,11 +318,10 @@ class EncheresWatcher {
         })
         .setTimestamp();
 
-      // ✅ VRAIE NOTIFICATION - Mention dans content
       const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
 
       await channel.send({
-        content: mentionContent, // 🔔 Badge rouge !
+        content: mentionContent,
         embeds: [embed]
       });
 
@@ -448,11 +464,10 @@ class EncheresWatcher {
         })
         .setTimestamp();
 
-      // ✅ VRAIE NOTIFICATION - Mention dans content
       const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
 
       await channel.send({ 
-        content: mentionContent, // 🔔 Badge rouge !
+        content: mentionContent,
         embeds: [embed] 
       });
       
@@ -532,11 +547,10 @@ class EncheresWatcher {
         })
         .setTimestamp();
 
-      // ✅ VRAIE NOTIFICATION - Mention dans content
       const mentionContent = startedBy ? `<@${startedBy}>` : undefined;
 
       await channel.send({ 
-        content: mentionContent, // 🔔 Badge rouge !
+        content: mentionContent,
         embeds: [embed] 
       });
       
