@@ -70,12 +70,12 @@ module.exports = {
 
       // Récupérer les données de la ligue
       const clubLeagueData = await apiClient.makeRpcRequest('get_clubs_league', { 
-        club_ids: [clubId.toString()] 
+        club_ids: [clubId]  // Array de nombres, pas de strings
       });
       
       let leagueId = null;
       if (clubLeagueData && Array.isArray(clubLeagueData)) {
-        const clubLeague = clubLeagueData.find(cl => cl.club_id === clubId.toString());
+        const clubLeague = clubLeagueData.find(cl => parseInt(cl.club_id) === clubId);
         if (clubLeague && clubLeague.league_id) {
           leagueId = clubLeague.league_id;
         }
