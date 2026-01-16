@@ -20,7 +20,19 @@ module.exports = {
             '**`!matchs [club_id]`** - Voir les matchs d\'un club (dernier et prochain)\n' +
             '**`!calendrier [club_id]`** - Voir le calendrier des prochains matchs\n' +
             '**`!classement [club_id]`** - Voir le classement de la ligue\n' +
+            '**`!salaire [club_id]`** - Calculer le salaire club/match cible\n' +
             '**`!help`** - Afficher cette aide',
+          inline: false
+        },
+        {
+          name: '💰 Calculateur de Salaire',
+          value:
+            '**`!salaire [club_id]`** - Afficher les salaires cibles selon la position\n' +
+            '• Salaire pour votre position actuelle\n' +
+            '• Salaire pour le 1er du classement\n' +
+            '• Salaire pour le milieu de tableau\n' +
+            '• Salaire pour le dernier\n' +
+            '• Données financières complètes du club',
           inline: false
         },
         {
@@ -35,44 +47,6 @@ module.exports = {
           inline: false
         },
         {
-          name: '⛽ Surveillance du Gas Polygon',
-          value:
-            '**`!gastracker start`** - Activer la surveillance du gas dans ce salon\n' +
-            '**`!gastracker stop`** - Arrêter la surveillance\n' +
-            '**`!gastracker status`** - Voir le statut actuel\n' +
-            '**`!gastracker format <format>`** - Personnaliser l\'affichage\n' +
-            '**`!gastracker update`** - Forcer une mise à jour',
-          inline: false
-        },
-        {
-          name: '📊 Surveillance Orderbook',
-          value: 
-            '**`!orderbook [club_id] [min] [max]`** - Surveiller les ordres de parts\n' +
-            '**`!watchlist`** - Gérer les surveillances orderbook actives\n' +
-            '**`!watchlist stop [club_id]`** - Arrêter surveillance orderbook\n' +
-            '**`!stopwatch [club_id]`** - Arrêter rapidement une surveillance',
-          inline: false
-        },
-        {
-          name: '👥 Surveillance Utilisateurs (Stalker)',
-          value: 
-            '**`!stalker <username>`** - Surveiller les transactions d\'un utilisateur\n' +
-            '**`!stalker <username> remove`** - Arrêter surveillance d\'un utilisateur\n' +
-            '**`!stalker list`** - Voir tous les utilisateurs surveillés\n' +
-            '**`!stalker status`** - Statut du service stalker',
-          inline: false
-        },
-        {
-          name: '⚙️ Commandes admin',
-          value: 
-            '**`!notifications [status|test|reset]`** - Gérer les notifications (admin)\n' +
-            '**`!nextresults`** - Voir les prochains résultats programmés (admin)\n' +
-            '**`!update`** - Mettre à jour les mappings de noms (admin)\n' +
-            '**`!reload <commande>`** - Recharger une commande (admin)\n' +
-            '**`!stalkeradmin [status|test|reset]`** - Admin service stalker (admin)',
-          inline: false
-        },
-        {
           name: '💡 Exemples - Commandes générales',
           value: 
             '`!inscription 2180` - S\'inscrire au club ID 2180\n' +
@@ -81,7 +55,8 @@ module.exports = {
             '`!club` - Voir tous les clubs inscrits dans ce salon\n' +
             '`!matchs` - Voir les matchs du club inscrit\n' +
             '`!calendrier 2180 10` - Voir 10 prochains matchs du club\n' +
-            '`!classement` - Voir le classement de la ligue du club inscrit',
+            '`!classement` - Voir le classement de la ligue du club inscrit\n' +
+            '`!salaire 3227` - Calculer les salaires cibles pour le club 3227',
           inline: false
         },
         {
@@ -96,33 +71,13 @@ module.exports = {
           inline: false
         },
         {
-          name: '💡 Exemples - Orderbook',
-          value: 
-            '`!orderbook 2180` - Voir l\'orderbook du club 2180\n' +
-            '`!orderbook 2180 1000 5000` - Surveiller ordres entre 1000$ et 5000$\n' +
-            '`!watchlist` - Voir toutes les surveillances orderbook\n' +
-            '`!stopwatch` - Arrêter rapidement toutes les surveillances',
-          inline: false
-        },
-        {
-          name: '💡 Exemples - Stalker',
-          value: 
-            '`!stalker CrazyCult` - Surveiller les transactions de CrazyCult\n' +
-            '`!stalker GamblerTheOne` - Surveiller GamblerTheOne\n' +
-            '`!stalker CrazyCult remove` - Arrêter surveillance\n' +
-            '`!stalker list` - Voir tous les utilisateurs surveillés',
-          inline: false
-        },
-        {
           name: '🔔 Notifications automatiques',
           value: 
             '• **Matchs :** Deadlines de composition (6h/3h/1h avant)\n' +
             '• **Résultats :** Score final automatiquement après les matchs\n' +
             '• **Enchères :** Dépassements + fins imminentes (30/15/5/1 min)\n' +
             '  └ Notification de fin + suppression auto quand enchère terminée\n' +
-            '  └ Vous êtes mentionné (@vous) dans chaque notification\n' +
-            '• **Orderbook :** Nouveaux ordres selon vos critères\n' +
-            '• **Stalker :** Transactions de parts des utilisateurs surveillés',
+            '  └ Vous êtes mentionné (@vous) dans chaque notification',
           inline: false
         },
         {
@@ -136,6 +91,16 @@ module.exports = {
             '• **Types surveillés :** Enchères de vos clubs + joueurs spécifiques\n' +
             '• **Fréquence :** Vérification toutes les 60 secondes\n' +
             '• **Smart :** Pas de spam, notifications uniques et intelligentes',
+          inline: false
+        },
+        {
+          name: '💰 Calculateur de Salaire - Détails',
+          value: 
+            '• **Salaires cibles :** Calculés selon votre position dans la ligue\n' +
+            '• **Données complètes :** Base de fans, capacité stade, prix billet, droits TV\n' +
+            '• **Simulations :** Salaires pour 1er, milieu de tableau, et dernier\n' +
+            '• **Recommandations :** Salaire club/match optimal pour équilibrer votre budget\n' +
+            '• **Basé sur :** Revenus de billetterie, sponsoring, merchandising, TV, et primes',
           inline: false
         },
         {
@@ -161,7 +126,7 @@ module.exports = {
           value: 
             '• **Problème avec le bot ?** Contactez les développeurs\n' +
             '• **Suggestions d\'améliorations** bienvenues !\n' +
-            '• **Version actuelle :** 3.0.0 avec surveillance enchères complète\n' +
+            '• **Version actuelle :** 3.0.0 avec calculateur de salaires\n' +
             '• **Source :** Bot non officiel pour la communauté Soccerverse',
           inline: false
         }
@@ -172,11 +137,27 @@ module.exports = {
       })
       .setTimestamp();
 
-    // Ajouter les statistiques si demandé par un admin
+    // Ajouter les statistiques et commandes admin si admin
     if (message.member && message.member.permissions.has('ADMINISTRATOR')) {
+      // Section commandes admin
+      embed.addFields({
+        name: '⚙️ Commandes Admin (Cachées)',
+        value: 
+          '**Surveillance avancée :**\n' +
+          '• `!gastracker start/stop/status` - Gas Polygon\n' +
+          '• `!orderbook [club_id] [min] [max]` - Orderbook\n' +
+          '• `!stalker <username>` - Transactions utilisateurs\n' +
+          '**Gestion :**\n' +
+          '• `!notifications [status|test|reset]`\n' +
+          '• `!update` - MAJ mappings\n' +
+          '• `!reload <commande>` - Recharger commande',
+        inline: false
+      });
+
+      // Statistiques
       const stats = dataManager.getStats();
       embed.addFields({
-        name: '📊 Statistiques (Admin)',
+        name: '📊 Statistiques',
         value: 
           `• **Salons actifs :** ${stats.totalChannels}\n` +
           `• **Clubs uniques :** ${stats.totalClubs}\n` +
@@ -189,3 +170,4 @@ module.exports = {
     await message.reply({ embeds: [embed] });
   }
 };
+
