@@ -70,15 +70,20 @@ module.exports = {
 
       // Récupérer les données de la ligue
       const clubLeagueData = await apiClient.makeRpcRequest('get_clubs_league', { 
-        club_ids: [clubId]  // Array de nombres, pas de strings
+        club_id: clubId  // Singulier, comme dans le HTML qui fonctionne
       });
       
       let leagueId = null;
-      if (clubLeagueData && Array.isArray(clubLeagueData)) {
-        const clubLeague = clubLeagueData.find(cl => parseInt(cl.club_id) === clubId);
-        if (clubLeague && clubLeague.league_id) {
-          leagueId = clubLeague.league_id;
-        }
+      // La réponse contient .data comme dans le HTML
+      const clubLeague = clubLeagueData?.data || clubLeagueData;
+      
+      if (Array.isArray(clubLeague) && clubLeague.length > 0) {
+        // Si c'est un array, prendre le premier élément
+        const firstLeague = clubLeague[0];
+        leagueId = firstLeague.league_id;
+      } else if (clubLeague && clubLeague.league_id) {
+        // Si c'est un objet direct
+        leagueId = clubLeague.league_id;
       }
 
       if (!leagueId) {
