@@ -61,8 +61,8 @@ module.exports = {
     const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
 
     try {
-      // Récupérer les données du club
-      const clubData = await apiClient.makeRpcRequest('get_club', { name: clubId.toString() });
+      // Récupérer les données du club via getClubDetails (comme les autres commandes)
+      const clubData = await apiClient.getClubDetails(clubId);
       
       if (!clubData || !clubData.club_id) {
         throw new Error('Club introuvable');
@@ -87,14 +87,14 @@ module.exports = {
 
       // Récupérer les détails de la ligue
       const leagueData = await apiClient.makeRpcRequest('get_league', { 
-        league_id: leagueId.toString() 
+        league_id: parseInt(leagueId) 
       });
 
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
       // Récupérer le classement
       const leagueTable = await apiClient.makeRpcRequest('get_league_table', { 
-        league_id: leagueId.toString() 
+        league_id: parseInt(leagueId) 
       });
 
       const numClubs = leagueTable ? leagueTable.length : 20;
