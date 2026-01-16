@@ -91,23 +91,28 @@ module.exports = {
       }
 
       // Récupérer les détails de la ligue
-      const leagueData = await apiClient.makeRpcRequest('get_league', { 
+      const leagueResponse = await apiClient.makeRpcRequest('get_league', { 
         league_id: parseInt(leagueId) 
       });
-
+      
+      // Extraire .data comme dans le HTML
+      let leagueData = leagueResponse?.data || leagueResponse;
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
       // Récupérer le classement
-      const leagueTable = await apiClient.makeRpcRequest('get_league_table', { 
+      const leagueTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
         league_id: parseInt(leagueId) 
       });
+      
+      // Extraire .data comme dans le HTML qui fonctionne
+      const leagueTable = leagueTableResponse?.data || leagueTableResponse;
 
-      const numClubs = leagueTable ? leagueTable.length : 20;
+      const numClubs = Array.isArray(leagueTable) ? leagueTable.length : 20;
       
       // Trouver la position du club
       let clubPosition = null;
-      if (leagueTable) {
-        const clubEntry = leagueTable.find(entry => entry.club_id === clubId.toString());
+      if (Array.isArray(leagueTable)) {
+        const clubEntry = leagueTable.find(entry => parseInt(entry.club_id) === clubId);
         if (clubEntry) {
           clubPosition = clubEntry.position;
         }
