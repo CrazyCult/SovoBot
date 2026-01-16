@@ -186,6 +186,21 @@ module.exports = {
       const lastPlace = calculateTargetSalary(numClubs, numClubs);
       const currentPos = clubPosition ? calculateTargetSalary(clubPosition, numClubs) : null;
 
+      // Fonction locale pour formater les salaires (déjà en dollars)
+      const formatSalary = (amount) => {
+        if (!amount || amount === 0) return '0$';
+        
+        if (amount >= 1000000000) {
+          return `${(amount / 1000000000).toFixed(1)}B$`;
+        } else if (amount >= 1000000) {
+          return `${(amount / 1000000).toFixed(1)}M$`;
+        } else if (amount >= 1000) {
+          return `${(amount / 1000).toFixed(1)}K$`;
+        } else {
+          return `${Math.round(amount).toLocaleString('fr-FR')}$`;
+        }
+      };
+
       // Créer l'embed de réponse
       const clubName = apiClient.getClubName(clubId);
       
@@ -209,10 +224,10 @@ module.exports = {
         embed.addFields({
           name: `🎯 Votre Position Actuelle (${clubPosition}${clubPosition === 1 ? 'er' : 'e'})`,
           value: 
-            `💵 **Salaire cible: ${apiClient.formatMoney(currentPos.salary)}/match**\n` +
+            `💵 **Salaire cible: ${formatSalary(currentPos.salary)}/match**\n` +
             `👥 Affluence estimée: ${currentPos.attendance.toLocaleString('fr-FR')} fans\n` +
-            `💰 Revenus saison: ${apiClient.formatMoney(currentPos.income)}\n` +
-            `🏆 Prime estimée: ${apiClient.formatMoney(currentPos.prize)}`,
+            `💰 Revenus saison: ${formatSalary(currentPos.income)}\n` +
+            `🏆 Prime estimée: ${formatSalary(currentPos.prize)}`,
           inline: false
         });
       }
@@ -221,21 +236,21 @@ module.exports = {
         {
           name: '🥇 1er du Classement',
           value: 
-            `💵 Salaire cible: **${apiClient.formatMoney(firstPlace.salary)}/match**\n` +
+            `💵 Salaire cible: **${formatSalary(firstPlace.salary)}/match**\n` +
             `👥 Affluence: ${firstPlace.attendance.toLocaleString('fr-FR')} fans`,
           inline: true
         },
         {
           name: `📊 Milieu de Tableau (${Math.ceil(numClubs / 2)}e)`,
           value: 
-            `💵 Salaire cible: **${apiClient.formatMoney(midTable.salary)}/match**\n` +
+            `💵 Salaire cible: **${formatSalary(midTable.salary)}/match**\n` +
             `👥 Affluence: ${midTable.attendance.toLocaleString('fr-FR')} fans`,
           inline: true
         },
         {
           name: `📉 Dernier (${numClubs}e)`,
           value: 
-            `💵 Salaire cible: **${apiClient.formatMoney(lastPlace.salary)}/match**\n` +
+            `💵 Salaire cible: **${formatSalary(lastPlace.salary)}/match**\n` +
             `👥 Affluence: ${lastPlace.attendance.toLocaleString('fr-FR')} fans`,
           inline: true
         }
