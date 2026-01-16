@@ -403,6 +403,42 @@ class ApiClient {
     return results;
   }
 
+  // =================== MÉTHODES TRANSFERTS ===================
+
+  /**
+   * 🆕 Récupère l'historique de transfert d'un joueur
+   * @param {number} playerId - ID du joueur
+   * @returns {Array} Liste des transferts (du plus récent au plus ancien)
+   */
+  async getPlayerTransferHistory(playerId) {
+    if (!playerId || isNaN(playerId)) {
+      throw new Error('ID de joueur invalide');
+    }
+    
+    const data = await this.makeRequest('/player/transfer_history', {
+      player_id: parseInt(playerId)
+    });
+    
+    // L'API retourne un array de transferts
+    // Structure de chaque transfert:
+    // {
+    //   player_id: number,
+    //   date: timestamp,
+    //   club_id_from: number,
+    //   club_id_to: number,
+    //   amount: number (en centimes)
+    // }
+    
+    if (!Array.isArray(data)) {
+      logger.warn(`Format inattendu pour historique transfert joueur ${playerId}`);
+      return [];
+    }
+    
+    logger.debug(`📜 Historique transfert joueur ${playerId}: ${data.length} transfert(s)`);
+    
+    return data;
+  }
+
   // =================== MÉTHODES CLASSEMENTS ===================
   
   async getLeagueTable(leagueId) {
