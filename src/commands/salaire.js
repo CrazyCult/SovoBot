@@ -122,7 +122,7 @@ module.exports = {
       const fanBase = clubData.fans_current || 0;
       const stadiumCapacity = clubData.stadium_size_current || 0;
       const ticketPrice = (leagueInfo.ticket_cost || 0) / 10000;
-      const tvMoney = (leagueInfo.tv_money || 0) / 1000;
+      const tvMoney = (leagueInfo.tv_money || 0) / 10000; // Diviser par 10000 comme le HTML
 
       // Calculer les matchs
       const apiRounds = leagueInfo.round || 1;
