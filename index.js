@@ -12,6 +12,7 @@ const PolygonStalkerService = require('./src/services/PolygonStalkerService');
 const EncheresWatcher = require('./src/services/EncheresWatcher');
 const ClubNewsWatcher = require('./src/services/ClubNewsWatcher');
 const GasTrackerService = require('./src/services/GasTrackerService');
+const ClubFollowerWatcher = require('./src/services/ClubFollowerWatcher'); // 🆕 AJOUTÉ
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -42,6 +43,7 @@ class SoccerverseBot {
     this.encheresWatcher = null;
     this.clubNewsWatcher = null;
     this.gasTrackerService = null;
+    this.clubFollowerWatcher = null; // 🆕 AJOUTÉ
     
     // Charger les commandes
     this.loadCommands();
@@ -109,6 +111,10 @@ class SoccerverseBot {
       this.gasTrackerService = new GasTrackerService(this.client, this.dataManager);
       this.gasTrackerService.start();
       logger.info('⛽ Service Gas Tracker Polygon démarré');
+
+      // 🆕 Initialiser le service de suivi des clubs
+      this.clubFollowerWatcher = new ClubFollowerWatcher(this.client, this.dataManager, this.apiClient);
+      logger.info('📊 Service de suivi des clubs initialisé');
     });
 
     // Event: Messages (commandes avec préfixe !)
@@ -137,7 +143,8 @@ class SoccerverseBot {
           polygonStalkerService: this.polygonStalkerService,
           encheresWatcher: this.encheresWatcher,
           clubNewsWatcher: this.clubNewsWatcher,
-          gasTrackerService: this.gasTrackerService
+          gasTrackerService: this.gasTrackerService,
+          clubFollowerWatcher: this.clubFollowerWatcher // 🆕 AJOUTÉ
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
@@ -320,7 +327,8 @@ class SoccerverseBot {
               polygonStalkerService: this.polygonStalkerService,
               encheresWatcher: this.encheresWatcher,
               clubNewsWatcher: this.clubNewsWatcher,
-              gasTrackerService: this.gasTrackerService
+              gasTrackerService: this.gasTrackerService,
+              clubFollowerWatcher: this.clubFollowerWatcher
             });
           }
         } catch (error) {
@@ -395,7 +403,8 @@ class SoccerverseBot {
               polygonStalkerService: this.polygonStalkerService,
               encheresWatcher: this.encheresWatcher,
               clubNewsWatcher: this.clubNewsWatcher,
-              gasTrackerService: this.gasTrackerService
+              gasTrackerService: this.gasTrackerService,
+              clubFollowerWatcher: this.clubFollowerWatcher
             });
           }
         } catch (error) {
@@ -500,7 +509,8 @@ class SoccerverseBot {
               polygonStalkerService: this.polygonStalkerService,
               encheresWatcher: this.encheresWatcher,
               clubNewsWatcher: this.clubNewsWatcher,
-              gasTrackerService: this.gasTrackerService
+              gasTrackerService: this.gasTrackerService,
+              clubFollowerWatcher: this.clubFollowerWatcher
             });
           }
         } catch (error) {
