@@ -239,51 +239,59 @@ class EncheresWatcher {
 
       const playerName = this.apiClient.getPlayerName(auction.player_id);
 
-      // Valeurs par défaut
-      let winnerName = this.apiClient.getClubName(auction.highest_bidder);
-      let finalPrice = auction.highest_bid || 0;
-      let winnerClubId = auction.highest_bidder;
+      // ⏱️ Attendre 10 secondes pour que le transfert soit enregistré
+      logger.debug(`⏱️ Attente de 10 secondes pour finalisation du transfert de ${playerName}...`);
+      await new Promise(resolve => setTimeout(resolve, 10000));
 
-      // 🔥 CORRECTION: Récupérer les détails finaux depuis l'API
+      // Valeurs par défaut (fallback)
+      let winnerName = 'Inconnu';
+      let finalPrice = 0;
+      let winnerClubId = null;
+
+      // 🔥 SOLUTION: Utiliser l'endpoint REST /player/transfer_history
       try {
-        // Option 1: Récupérer les détails de l'enchère
-        const finalDetails = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
-          player_id: auction.player_id
-        });
+        const transferHistory = await this.apiClient.getPlayerTransferHistory(auction.player_id);
 
-        // Vérifier les deux structures de réponse possibles
-        let detailData = null;
-        if (finalDetails && finalDetails.data) {
-          detailData = finalDetails.data;
-        } else if (finalDetails && finalDetails.high_bid !== undefined) {
-          detailData = finalDetails;
-        }
-
-        // Si on a des détails avec high_bid, les utiliser
-        if (detailData && detailData.high_bid) {
-          winnerClubId = detailData.high_bid.club_id;
+        if (transferHistory && Array.isArray(transferHistory) && transferHistory.length > 0) {
+          const lastTransfer = transferHistory[0];
+          winnerClubId = lastTransfer.club_id_to;
           winnerName = this.apiClient.getClubName(winnerClubId);
-          finalPrice = detailData.high_bid.amount;
-          logger.debug(`✅ Détails finaux confirmés pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
+          finalPrice = lastTransfer.amount;
+          logger.info(`✅ Transfert confirmé pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
         } else {
-          // Option 2: Essayer avec l'historique de transfert si pas de high_bid
-          logger.debug(`⚠️ Pas de high_bid, essai avec l'historique de transfert pour ${playerName}`);
+          logger.warn(`⚠️ Aucun historique de transfert trouvé pour ${playerName}, tentative avec auction details...`);
           
-          const transferHistory = await this.apiClient.makeRpcRequest('get_player_transfer_history', {
+          // Fallback: essayer avec get_transfer_auction_details
+          const auctionDetails = await this.apiClient.makeRpcRequest('get_transfer_auction_details', {
             player_id: auction.player_id
           });
-
-          // Récupérer le dernier transfert (le plus récent)
-          if (transferHistory && Array.isArray(transferHistory) && transferHistory.length > 0) {
-            const lastTransfer = transferHistory[0];
-            winnerClubId = lastTransfer.new_club_id;
+          
+          let detailData = null;
+          if (auctionDetails && auctionDetails.data) {
+            detailData = auctionDetails.data;
+          } else if (auctionDetails && auctionDetails.started !== undefined) {
+            detailData = auctionDetails;
+          }
+          
+          if (detailData && detailData.high_bid) {
+            winnerClubId = detailData.high_bid.club_id;
             winnerName = this.apiClient.getClubName(winnerClubId);
-            finalPrice = lastTransfer.price;
-            logger.debug(`✅ Infos récupérées via historique pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
+            finalPrice = detailData.high_bid.amount;
+            logger.info(`✅ Détails depuis auction pour ${playerName}: ${winnerName} - ${this.formatCurrency(finalPrice)}`);
+          } else {
+            // Dernier recours: utiliser les données de l'enchère
+            winnerClubId = auction.highest_bidder;
+            winnerName = this.apiClient.getClubName(winnerClubId);
+            finalPrice = auction.highest_bid || 0;
+            logger.warn(`⚠️ Utilisation des données d'enchère pour ${playerName}`);
           }
         }
       } catch (error) {
-        logger.debug(`⚠️ Utilisation des données d'enchère pour ${playerName} (API indisponible): ${error.message}`);
+        logger.error(`❌ Erreur récupération transfert pour ${playerName}:`, error.message);
+        // Utiliser les données de l'enchère comme ultime fallback
+        winnerClubId = auction.highest_bidder;
+        winnerName = this.apiClient.getClubName(winnerClubId);
+        finalPrice = auction.highest_bid || 0;
       }
 
       const embed = new EmbedBuilder()
