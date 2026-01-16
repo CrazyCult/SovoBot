@@ -100,8 +100,10 @@ module.exports = {
     const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
 
     try {
-      // Récupérer les données du club via getClubDetails (comme les autres commandes)
-      const clubData = await apiClient.getClubDetails(clubId);
+      // Récupérer les données du club via RPC (plus rapide que /clubs/detailed)
+      const clubData = await apiClient.makeRpcRequest('get_club', { 
+        club_id: clubId 
+      });
       
       if (!clubData || !clubData.club_id) {
         throw new Error('Club introuvable');
