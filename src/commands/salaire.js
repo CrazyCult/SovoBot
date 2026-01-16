@@ -101,13 +101,25 @@ module.exports = {
 
     try {
       // Récupérer les données du club via RPC (plus rapide que /clubs/detailed)
-      const clubData = await apiClient.makeRpcRequest('get_club', { 
+      console.log(`[SALAIRE] Récupération club ${clubId}...`);
+      const clubResponse = await apiClient.makeRpcRequest('get_club', { 
         club_id: clubId 
       });
       
+      console.log(`[SALAIRE] Réponse get_club:`, clubResponse);
+      
+      // Extraire .data comme les autres RPC
+      const clubData = clubResponse?.data || clubResponse;
+      
+      console.log(`[SALAIRE] clubData après extraction:`, clubData);
+      console.log(`[SALAIRE] clubData.club_id:`, clubData?.club_id);
+      
       if (!clubData || !clubData.club_id) {
+        console.log(`[SALAIRE] ❌ Club introuvable - clubData:`, clubData);
         throw new Error('Club introuvable');
       }
+      
+      console.log(`[SALAIRE] ✅ Club trouvé:`, clubData.club_id);
 
       // Récupérer les données de la ligue
       const clubLeagueData = await apiClient.makeRpcRequest('get_clubs_league', { 
