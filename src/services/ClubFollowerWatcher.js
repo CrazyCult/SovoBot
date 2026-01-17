@@ -15,14 +15,36 @@ class ClubFollowerWatcher {
     // Vérification toutes les 3 minutes (rotation)
     this.checkInterval = 3 * 60 * 1000;
 
-    // Saison par défaut
-    this.defaultSeasonId = 2;
+    // 🔧 CORRECTION: Saison dynamique au lieu de hardcodé
+    this.defaultSeasonId = null;
 
     // Charger les configurations sauvegardées
     this.loadConfigurations();
 
+    // Initialiser la saison dynamiquement
+    this.initializeSeasonId();
+
     // Démarrer le monitoring en rotation
     this.startRotation();
+  }
+
+  // 🆕 NOUVELLE MÉTHODE: Récupérer la saison dynamiquement
+  async initializeSeasonId() {
+    try {
+      this.defaultSeasonId = await this.apiClient.getCurrentSeason();
+      logger.info(`📅 ClubFollowerWatcher: Saison courante détectée: ${this.defaultSeasonId}`);
+    } catch (error) {
+      logger.warn('⚠️ ClubFollowerWatcher: Impossible de récupérer la saison, fallback sur 3');
+      this.defaultSeasonId = 3;
+    }
+  }
+
+  // 🆕 HELPER: S'assurer que la saison est initialisée
+  async ensureSeasonId() {
+    if (!this.defaultSeasonId) {
+      await this.initializeSeasonId();
+    }
+    return this.defaultSeasonId;
   }
 
   // =================== CHARGEMENT/SAUVEGARDE ===================
@@ -155,10 +177,13 @@ class ClubFollowerWatcher {
   // 🔧 MÉTHODE CORRIGÉE: Utiliser l'endpoint REST /messages au lieu de RPC
   async fetchClubMessages(clubId) {
     try {
+      // S'assurer que la saison est initialisée
+      const seasonId = await this.ensureSeasonId();
+
       // Utiliser l'endpoint REST /messages au lieu de RPC
       const response = await this.apiClient.makeRequest('/messages', {
         club_id: clubId,
-        season_id: this.defaultSeasonId
+        season_id: seasonId
       });
 
       // L'API retourne { items: [...], total: X }
