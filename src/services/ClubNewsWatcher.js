@@ -232,7 +232,7 @@ class ClubNewsWatcher {
       255, // Passage au tour suivant de la coupe
       500, // Nouveau manager
       501, // Nouvel entraineur
-      504  // Départ entraineur
+      504  // Entraineur dévérouillé
     ];
 
     if (!relevantTypes.includes(message.type)) {
@@ -365,11 +365,11 @@ class ClubNewsWatcher {
         }
         // Si club1 === clubId, le joueur PART du club surveillé vers club2
         else if (club1 === clubIdNum) {
-          return `💰 **${playerName}** a quitté le club pour rejoindre **${club2Name}** pour **${amount.toLocaleString()} $**.`;
+          return `💰 **${playerName}** a quitté **${club2Name}** pour rejoindre **${club1Name}** pour **${amount.toLocaleString()} $**.`;
         }
         // Si club2 === clubId, le joueur ARRIVE au club surveillé depuis club1
         else if (club2 === clubIdNum) {
-          return `💰 **${playerName}** est arrivé de **${club1Name}** pour **${amount.toLocaleString()} $**.`;
+          return `💰 **${playerName}** a quitté **${club2Name}** pour rejoindre **${club1Name}**** pour **${amount.toLocaleString()} $**.`;
         }
         // Cas par défaut (ne devrait pas arriver)
         else {
@@ -413,7 +413,7 @@ class ClubNewsWatcher {
         return `👨‍💼 **${name || 'Un nouvel entraineur'}** arrive comme entraineur.`;
 
       case 504:
-        return `👋 **${name || 'L\'entraineur'}** quitte son poste d'entraineur.`;
+        return `👋 **${name || 'L\'entraineur'}** est dévérouillé.`;
 
       default:
         return `❓ Nouvelle actualité (Type ${type})`;
