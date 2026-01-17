@@ -152,20 +152,32 @@ class ClubFollowerWatcher {
     }
   }
 
+  // 🔧 MÉTHODE CORRIGÉE: Utiliser l'endpoint REST /messages au lieu de RPC
   async fetchClubMessages(clubId) {
     try {
-      const result = await this.apiClient.makeRpcRequest('get_club_messages', {
+      // Utiliser l'endpoint REST /messages au lieu de RPC
+      const response = await this.apiClient.makeRequest('/messages', {
         club_id: clubId,
         season_id: this.defaultSeasonId
       });
 
-      if (!result || !result.data) {
+      // L'API retourne { items: [...], total: X }
+      if (!response || !response.items) {
+        logger.debug(`📰 Aucun message pour le club ${clubId}`);
         return [];
       }
 
-      return result.data;
+      logger.debug(`📰 ${response.items.length} message(s) récupéré(s) pour le club ${clubId}`);
+      return response.items;
+      
     } catch (error) {
-      logger.debug(`⚠️ Impossible de récupérer les messages du club ${clubId}`);
+      // Si l'erreur est 404, c'est que le club n'a pas de messages, pas une vraie erreur
+      if (error.message && error.message.includes('404')) {
+        logger.debug(`📰 Aucun message disponible pour le club ${clubId}`);
+        return [];
+      }
+      
+      logger.debug(`⚠️ Impossible de récupérer les messages du club ${clubId}: ${error.message}`);
       return [];
     }
   }
