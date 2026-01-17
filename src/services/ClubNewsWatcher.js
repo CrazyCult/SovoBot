@@ -10,8 +10,11 @@ class ClubNewsWatcher {
     // Charger les messages déjà traités
     this.processedMessages = this.loadProcessedMessages();
 
-    // Vérification toutes les 4h (4 * 60 * 60 * 1000 ms)
-    this.checkInterval = 4 * 60 * 60 * 1000;
+    // 🔧 ROTATION: Vérifier un club toutes les 5 minutes (au lieu de tous les clubs toutes les heures)
+    this.checkInterval = 5 * 60 * 1000; // 5 minutes
+
+    // Index pour la rotation des clubs
+    this.currentClubIndex = 0;
 
     // 🔧 CORRECTION: Saison dynamique au lieu de hardcodé
     this.defaultSeasonId = null;
@@ -94,20 +97,20 @@ class ClubNewsWatcher {
   }
 
   startWatching() {
-    // Première vérification après 30 secondes (pour laisser le temps au bot de démarrer)
+    // 🔧 ROTATION: Première vérification après 30 secondes
     setTimeout(() => {
-      this.checkClubNews();
+      this.checkNextClub();
     }, 30000);
 
-    // Puis vérifier toutes les 4h
+    // Puis vérifier un club différent toutes les 5 minutes
     setInterval(() => {
-      this.checkClubNews();
+      this.checkNextClub();
     }, this.checkInterval);
 
-    logger.info('📰 Surveillance actualités des clubs démarrée (vérification toutes les 4h)');
+    logger.info('📰 Surveillance actualités en rotation démarrée (1 club toutes les 5 minutes)');
   }
 
-  async checkClubNews() {
+  async checkNextClub() {
     try {
       // S'assurer que la saison est initialisée
       await this.ensureSeasonId();
@@ -119,35 +122,31 @@ class ClubNewsWatcher {
         return;
       }
 
-      logger.info(`📰 Vérification actualités pour ${registeredClubs.length} club(s) (saison ${this.defaultSeasonId})`);
-
-      // Vérifier chaque club avec un délai pour éviter de surcharger l'API
-      let validClubIndex = 0;
-      for (let i = 0; i < registeredClubs.length; i++) {
-        const clubId = parseInt(registeredClubs[i]);
-
-        // Ignorer les IDs invalides
-        if (isNaN(clubId)) {
-          logger.warn(`⚠️ ID de club invalide ignoré dans les actualités: "${registeredClubs[i]}"`);
-          continue;
-        }
-
-        setTimeout(async () => {
-          try {
-            await this.checkClubMessages(clubId);
-          } catch (error) {
-            logger.error(`❌ Erreur vérification actualités club ${clubId}:`, error.message);
-          }
-        }, validClubIndex * 2000); // 2 secondes d'écart entre chaque club
-
-        validClubIndex++;
+      // Sélectionner le club suivant en rotation
+      const clubId = parseInt(registeredClubs[this.currentClubIndex]);
+      
+      // Ignorer les IDs invalides
+      if (isNaN(clubId)) {
+        logger.warn(`⚠️ ID de club invalide ignoré dans les actualités: "${registeredClubs[this.currentClubIndex]}"`);
+        this.currentClubIndex = (this.currentClubIndex + 1) % registeredClubs.length;
+        return;
       }
 
-      // Nettoyage des anciens messages
-      this.cleanupProcessedMessages();
+      // Passer au club suivant pour la prochaine fois
+      this.currentClubIndex = (this.currentClubIndex + 1) % registeredClubs.length;
+
+      logger.debug(`📰 Vérification actualités: Club ${clubId} (${this.currentClubIndex}/${registeredClubs.length})`);
+
+      // Vérifier ce club
+      await this.checkClubMessages(clubId);
+
+      // Nettoyage occasionnel (toutes les 100 vérifications)
+      if (this.currentClubIndex === 0) {
+        this.cleanupProcessedMessages();
+      }
 
     } catch (error) {
-      logger.error('❌ Erreur surveillance actualités globale:', error);
+      logger.error('❌ Erreur surveillance actualités:', error);
     }
   }
 
@@ -514,17 +513,31 @@ class ClubNewsWatcher {
   }
 
   getNewsStats() {
+    const registeredClubs = this.dataManager.getAllRegisteredClubs();
+    const totalClubs = registeredClubs.length;
+    const cycleTime = totalClubs * (this.checkInterval / 60000); // en minutes
+    
     return {
       processedMessagesCount: this.processedMessages.size,
-      checkInterval: this.checkInterval / 1000 / 60 / 60, // En heures
+      checkInterval: this.checkInterval / 60000, // En minutes
+      totalClubs: totalClubs,
+      cycleTime: `${cycleTime} minutes (${(cycleTime / 60).toFixed(1)}h)`,
+      currentClubIndex: this.currentClubIndex,
       defaultSeasonId: this.defaultSeasonId,
-      method: 'Vérification toutes les 4h'
+      method: 'Rotation (1 club toutes les 5 minutes)'
     };
   }
 
   async forceCheckNews() {
-    logger.info('🔄 Vérification forcée actualités...');
-    await this.checkClubNews();
+    logger.info('🔄 Vérification forcée actualités (tous les clubs)...');
+    const registeredClubs = this.dataManager.getAllRegisteredClubs();
+    for (const clubId of registeredClubs) {
+      const clubIdNum = parseInt(clubId);
+      if (!isNaN(clubIdNum)) {
+        await this.checkClubMessages(clubIdNum);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 sec entre chaque
+      }
+    }
   }
 
   resetNewsCache() {
