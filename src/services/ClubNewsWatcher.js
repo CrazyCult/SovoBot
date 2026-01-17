@@ -156,25 +156,24 @@ class ClubNewsWatcher {
       // S'assurer que la saison est initialisée
       const seasonId = await this.ensureSeasonId();
 
-      // Appeler l'API pour récupérer les messages du club
-      const result = await this.apiClient.makeRpcRequest('get_club_messages', {
+      // 🔧 CORRECTION CRITIQUE: Utiliser l'endpoint REST /messages au lieu de RPC
+      const response = await this.apiClient.makeRequest('/messages', {
         club_id: clubId,
         season_id: seasonId
       });
 
-      // 🔥 CORRECTION CRITIQUE: L'API retourne directement un array dans result, pas result.data
       let messages = [];
 
-      if (!result) {
+      if (!response) {
         logger.debug(`📰 Aucune donnée d'actualités pour le club ${clubId}`);
         return;
       }
 
-      // La réponse peut être soit directement un array, soit un objet avec .data
-      if (Array.isArray(result)) {
-        messages = result;
-      } else if (result.data && Array.isArray(result.data)) {
-        messages = result.data;
+      // L'API retourne { items: [...], total: X }
+      if (response.items && Array.isArray(response.items)) {
+        messages = response.items;
+      } else if (Array.isArray(response)) {
+        messages = response;
       } else {
         logger.debug(`📰 Format de réponse inattendu pour le club ${clubId}`);
         return;
@@ -229,7 +228,9 @@ class ClubNewsWatcher {
       }
 
     } catch (error) {
-      if (error.message.includes('429') || error.message.includes('timeout')) {
+      if (error.message && error.message.includes('404')) {
+        logger.debug(`📰 Aucun message disponible pour le club ${clubId}`);
+      } else if (error.message.includes('429') || error.message.includes('timeout')) {
         logger.warn(`⚠️ Rate limit/timeout club ${clubId}, skip actualités`);
       } else {
         logger.error(`❌ Erreur récupération actualités club ${clubId}:`, error);
