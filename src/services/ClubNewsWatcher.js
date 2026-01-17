@@ -53,7 +53,7 @@ class ClubNewsWatcher {
 
       if (settings && settings.processedMessages) {
         const map = new Map();
-        const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000);
+        const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000); // 🔥 60 jours pour éviter les doublons
 
         // Charger tous les messages récents (60 derniers jours)
         for (const [key, data] of Object.entries(settings.processedMessages)) {
@@ -156,24 +156,25 @@ class ClubNewsWatcher {
       // S'assurer que la saison est initialisée
       const seasonId = await this.ensureSeasonId();
 
-      // 🔧 CORRECTION: Utiliser l'endpoint REST /messages au lieu de RPC
-      const response = await this.apiClient.makeRequest('/messages', {
+      // Appeler l'API pour récupérer les messages du club
+      const result = await this.apiClient.makeRpcRequest('get_club_messages', {
         club_id: clubId,
         season_id: seasonId
       });
 
+      // 🔥 CORRECTION CRITIQUE: L'API retourne directement un array dans result, pas result.data
       let messages = [];
 
-      if (!response) {
+      if (!result) {
         logger.debug(`📰 Aucune donnée d'actualités pour le club ${clubId}`);
         return;
       }
 
-      // L'API retourne { items: [...], total: X }
-      if (response.items && Array.isArray(response.items)) {
-        messages = response.items;
-      } else if (Array.isArray(response)) {
-        messages = response;
+      // La réponse peut être soit directement un array, soit un objet avec .data
+      if (Array.isArray(result)) {
+        messages = result;
+      } else if (result.data && Array.isArray(result.data)) {
+        messages = result.data;
       } else {
         logger.debug(`📰 Format de réponse inattendu pour le club ${clubId}`);
         return;
@@ -193,7 +194,8 @@ class ClubNewsWatcher {
         return !this.processedMessages.has(messageKey);
       });
 
-      // Filtrer les messages trop anciens (>7 jours)
+      // 🔥 NOUVELLE VÉRIFICATION: Filtrer les messages trop anciens (>7 jours)
+      // Cela évite de re-notifier de vieilles actualités si le cache a été perdu
       const sevenDaysAgo = Date.now() / 1000 - (7 * 24 * 60 * 60);
       const recentMessages = newMessages.filter(msg => msg.date > sevenDaysAgo);
 
@@ -227,9 +229,7 @@ class ClubNewsWatcher {
       }
 
     } catch (error) {
-      if (error.message && error.message.includes('404')) {
-        logger.debug(`📰 Aucun message disponible pour le club ${clubId}`);
-      } else if (error.message.includes('429') || error.message.includes('timeout')) {
+      if (error.message.includes('429') || error.message.includes('timeout')) {
         logger.warn(`⚠️ Rate limit/timeout club ${clubId}, skip actualités`);
       } else {
         logger.error(`❌ Erreur récupération actualités club ${clubId}:`, error);
@@ -257,10 +257,12 @@ class ClubNewsWatcher {
       96,  // Suspension
       97,  // Suspension 3 matchs (expulsion)
       98,  // Suspension (accumulation cartons jaunes)
+      242, // Pas compris 
       255, // Passage au tour suivant de la coupe
-      500, // Nouveau manager
+      350, // Ajout de places au stade
+      500, // Démission de l'entraineur 
       501, // Nouvel entraineur
-      504  // Départ entraineur
+      504  // Entraineur dévérouillé
     ];
 
     if (!relevantTypes.includes(message.type)) {
@@ -317,120 +319,159 @@ class ClubNewsWatcher {
 
           // Récupérer l'utilisateur qui a inscrit le club
           const mentionIds = this.getMentionIdsForClub(channelId, clubId);
-          const mentions = mentionIds.length > 0 ?
-            mentionIds.map(id => `<@${id}>`).join(' ') : undefined;
+          const mentions = mentionIds.length > 0 ? mentionIds.map(id => `<@${id}>`).join(' ') : '';
 
-          // Créer l'embed
+          // Créer un embed simple
           const embed = new EmbedBuilder()
-            .setColor(this.getNewsColor(message.type))
-            .setTitle(`📰 ${clubName}`)
-            .setDescription(`${newsMessage.emoji} **${newsMessage.text}**`)
+            .setColor(this.getColorForMessageType(message.type))
+            .setTitle(`📰 Actualité - ${clubName}`)
+            .setDescription(newsMessage)
+            .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
             .addFields({
               name: '📅 Date',
-              value: messageDate.toLocaleString('fr-FR'),
+              value: messageDate.toLocaleDateString('fr-FR', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              }),
               inline: true
             })
-            .setURL(`https://play.soccerverse.com/club/${clubId}`)
-            .setTimestamp();
+            .setTimestamp()
+            .setFooter({ text: 'Soccerverse Bot v3.0' });
+
+          // Ajouter un lien vers le joueur si c'est un événement joueur
+          if (message.data_1 && [7, 9, 81, 83, 92, 94, 96, 97, 98].includes(message.type)) {
+            embed.addFields({
+              name: '🔗 Liens',
+              value: `[Voir le joueur](https://play.soccerverse.com/player/${message.data_1}) • [Voir le club](https://play.soccerverse.com/club/${clubId})`,
+              inline: false
+            });
+          }
 
           await channel.send({
             content: mentions,
             embeds: [embed]
           });
 
-          logger.info(`📰 Notification actualité envoyée: ${clubName} (type ${message.type}) → ${channelId}`);
-
         } catch (error) {
-          logger.error(`❌ Erreur envoi notification dans canal ${channelId}:`, error);
+          logger.error(`❌ Erreur envoi notification actualité canal ${channelId}:`, error);
         }
       }
+
+      logger.info(`📰 Notification actualité envoyée: Club ${clubId}, ${channelsForClub.length} canal(aux)`);
 
     } catch (error) {
       logger.error('❌ Erreur envoi notification actualité:', error);
     }
   }
 
-  formatNewsMessage(msg, currentClubId) {
-    const type = msg.type;
-    const playerId = msg.data_1;
-    const data2 = msg.data_2;
-    const club1 = msg.club_1;
-    const club2 = msg.club_2;
-    const name = msg.name_1;
+  formatNewsMessage(message, clubId) {
+    const type = message.type;
+    const playerId = message.data_1;
+    const data2 = message.data_2;
+    const club1 = parseInt(message.club_1);
+    const club2 = parseInt(message.club_2);
+    const name = message.name_1;
+    const clubIdNum = parseInt(clubId);
 
+    // Récupérer le nom du joueur si c'est un événement joueur
     const playerName = playerId ? this.apiClient.getPlayerName(playerId) : null;
+    const club1Name = club1 ? this.apiClient.getClubName(club1) : null;
+    const club2Name = club2 ? this.apiClient.getClubName(club2) : null;
 
     switch(type) {
       case 7:
-        return { emoji: '🔒', text: `${playerName} retiré du marché` };
+        return `🔒 **${playerName}** a été retiré du marché.`;
 
       case 9:
-        const isLeaving = club1 === currentClubId;
-        const otherClubId = isLeaving ? club2 : club1;
-        const otherClubName = this.apiClient.getClubName(otherClubId);
+        // Diviser le montant par 10 000 pour avoir le montant en dollars
         const amount = Math.round(data2 / 10000);
 
-        if (isLeaving) {
-          return { emoji: '↗️', text: `${playerName} → ${otherClubName} (${this.apiClient.formatMoney(amount)})` };
-        } else {
-          return { emoji: '↘️', text: `${playerName} ← ${otherClubName} (${this.apiClient.formatMoney(amount)})` };
+        // Si club1 === 0, le joueur arrive en free agent
+        if (club1 === 0) {
+          return `💰 **${playerName}** est arrivé (free agent) pour **${amount.toLocaleString()} $**.`;
+        }
+        // Si club1 === clubId, le joueur PART du club surveillé vers club2
+        else if (club1 === clubIdNum) {
+          return `💰 **${playerName}** a quitté **${club2Name}** pour rejoindre **${club1Name}** pour **${amount.toLocaleString()} $**.`;
+        }
+        // Si club2 === clubId, le joueur ARRIVE au club surveillé depuis club1
+        else if (club2 === clubIdNum) {
+          return `💰 **${playerName}** a quitté **${club2Name}** pour rejoindre **${club1Name}** pour **${amount.toLocaleString()} $**.`;
+        }
+        // Cas par défaut (ne devrait pas arriver)
+        else {
+          return `💰 Transfert de **${playerName}** : ${club1Name} → ${club2Name} pour **${amount.toLocaleString()} $**.`;
         }
 
       case 81:
-        return { emoji: '📝', text: `${playerName} a renouvelé son contrat` };
+        // Renouvellement de contrat
+        const contractAmount = Math.round(data2 / 10000);
+        return `📝 **${playerName}** a renouvelé son contrat pour **${contractAmount.toLocaleString()} $**.`;
 
       case 83:
-        return { emoji: '🏷️', text: `${playerName} mis en vente` };
+        return `🏷️ **${playerName}** a été mis en vente.`;
 
       case 92:
-        return { emoji: '🤕', text: `${playerName} blessé (${data2}j)` };
+        return `🤕 **${playerName}** est blessé pour **${data2} jour${data2 > 1 ? 's' : ''}**.`;
 
       case 94:
-        return { emoji: '🚑', text: `${playerName} blessure sérieuse (${data2}j)` };
+        return `🚑 **${playerName}** a une blessure sérieuse pour **${data2} jour${data2 > 1 ? 's' : ''}**.`;
 
       case 96:
-        return { emoji: '🟥', text: `${playerName} suspendu (${data2} matchs)` };
+        return `🟥 **${playerName}** est suspendu pour **${data2} match${data2 > 1 ? 's' : ''}**.`;
 
       case 97:
-        return { emoji: '🟥', text: `${playerName} expulsé (3 matchs)` };
+        // Suspension de 3 matchs suite à une expulsion
+        return `🟥🟥 **${playerName}** est suspendu pour **3 matchs** suite à son expulsion.`;
 
       case 98:
-        return { emoji: '🟨', text: `${playerName} suspendu (cartons jaunes)` };
+        // Suspension pour accumulation de cartons jaunes
+        return `🟨➡️🟥 **${playerName}** est suspendu pour **${data2} match${data2 > 1 ? 's' : ''}** (accumulation de cartons jaunes).`;
 
       case 255:
-        return { emoji: '🏆', text: 'Qualifié pour le tour suivant' };
+        // Passage au tour suivant de la coupe
+        const cupName = name || 'la coupe';
+        return `🏆✨ Le club est qualifié pour le tour suivant de **${cupName}** !`;
 
       case 500:
+        return `👨‍💼 **${name || 'Un nouveau manager'}** a démissionné de son poste d'entraineur.`;
+
       case 501:
-        return { emoji: '👨‍💼', text: `${name} arrive` };
+        return `👨‍💼 **${name || 'Un nouvel entraineur'}** arrive comme entraineur.`;
 
       case 504:
-        return { emoji: '👋', text: `${name} quitte le club` };
+        return `👋 **${name || 'L\'entraineur'}** est dévérouillé.`;
 
       default:
-        return { emoji: '📰', text: `Actualité (type ${type})` };
+        return `❓ Nouvelle actualité (Type ${type})`;
     }
   }
 
-  getNewsColor(type) {
+  getColorForMessageType(type) {
     switch(type) {
-      case 7:   // Retiré du marché
-      case 83:  // Mis en vente
+      case 9: // Transfert
         return '#3498db'; // Bleu
-      case 9:   // Transfert
+      case 81: // Renouvellement de contrat
+        return '#2ecc71'; // Vert (succès)
+      case 92: // Blessure
+      case 94: // Blessure sérieuse
         return '#e74c3c'; // Rouge
-      case 92:  // Blessure
-      case 94:  // Blessure sérieuse
+      case 96: // Suspension
+      case 97: // Suspension 3 matchs (expulsion)
+      case 98: // Suspension (cartons jaunes)
         return '#e67e22'; // Orange
-      case 96:  // Suspension
-      case 97:  // Expulsion
-      case 98:  // Suspension cartons
-        return '#c0392b'; // Rouge foncé
+      case 83: // Mis en vente
+        return '#f39c12'; // Jaune
+      case 7: // Retiré du marché
+        return '#95a5a6'; // Gris
       case 255: // Qualification coupe
-        return '#f1c40f'; // Or
-      case 500: // Manager
+        return '#f1c40f'; // Or (succès)
+      case 500: // Démission
       case 501: // Entraineur
-      case 504: // Départ entraineur
+      case 504: // Dévérouillage entraineur
         return '#9b59b6'; // Violet
       default:
         return '#34495e'; // Bleu foncé
@@ -451,7 +492,7 @@ class ClubNewsWatcher {
   }
 
   cleanupProcessedMessages() {
-    const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000); // 🔥 60 jours pour éviter les doublons
     let cleanedCount = 0;
 
     for (const [key, messageData] of this.processedMessages.entries()) {
