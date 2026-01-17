@@ -21,7 +21,7 @@ class ApiClient {
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
     
-    // ✅ NOUVEAU: Cache spécifique pour la saison courante (24h)
+    // ✅ Cache spécifique pour la saison courante (24h)
     this.currentSeasonCache = null;
     this.currentSeasonCacheTime = null;
     this.seasonCacheTimeout = 24 * 60 * 60 * 1000; // 24 heures
@@ -212,7 +212,7 @@ class ApiClient {
     return club;
   }
 
-  // ✅ MÉTHODE OPTIMISÉE: Cache de 24h pour éviter appels répétés
+  // 🆕 MÉTHODE CORRIGÉE: Utiliser get_seasons pour détecter automatiquement la saison courante
   async getCurrentSeason() {
     // Vérifier le cache (valable 24h)
     if (this.currentSeasonCache && this.currentSeasonCacheTime) {
@@ -223,48 +223,50 @@ class ApiClient {
       }
     }
 
-    // ✅ PRIORITÉ 1: Utiliser get_current_season (endpoint officiel)
+    // ✅ NOUVELLE MÉTHODE: Utiliser get_seasons (qui existe vraiment!)
     try {
-      const currentSeason = await this.makeRpcRequest('get_current_season', {});
-      if (currentSeason && currentSeason.season_id) {
-        this.currentSeasonCache = currentSeason.season_id;
-        this.currentSeasonCacheTime = Date.now();
-        logger.info(`✅ Saison courante détectée: ${currentSeason.season_id}`);
-        return currentSeason.season_id;
+      const seasons = await this.makeRpcRequest('get_seasons', {});
+      
+      if (seasons && Array.isArray(seasons)) {
+        // Chercher la saison non terminée (finished: false)
+        const currentSeason = seasons.find(s => s.finished === false);
+        
+        if (currentSeason && currentSeason.season_id) {
+          this.currentSeasonCache = currentSeason.season_id;
+          this.currentSeasonCacheTime = Date.now();
+          logger.info(`✅ Saison courante détectée: ${currentSeason.season_id} (${currentSeason.name || 'Sans nom'})`);
+          return currentSeason.season_id;
+        }
+        
+        // Si aucune saison non terminée, prendre la dernière
+        const lastSeason = seasons[seasons.length - 1];
+        if (lastSeason && lastSeason.season_id) {
+          this.currentSeasonCache = lastSeason.season_id;
+          this.currentSeasonCacheTime = Date.now();
+          logger.info(`✅ Saison courante détectée (dernière): ${lastSeason.season_id} (${lastSeason.name || 'Sans nom'})`);
+          return lastSeason.season_id;
+        }
       }
     } catch (error) {
-      logger.debug(`⚠️ get_current_season non disponible: ${error.message}`);
+      logger.warn(`⚠️ get_seasons non disponible: ${error.message}`);
     }
 
-    // ✅ PRIORITÉ 2: Utiliser get_season_info
-    try {
-      const seasonInfo = await this.makeRpcRequest('get_season_info', {});
-      if (seasonInfo && seasonInfo.current_season) {
-        this.currentSeasonCache = seasonInfo.current_season;
-        this.currentSeasonCacheTime = Date.now();
-        logger.info(`✅ Saison courante détectée via season_info: ${seasonInfo.current_season}`);
-        return seasonInfo.current_season;
-      }
-    } catch (error) {
-      logger.debug(`⚠️ get_season_info non disponible: ${error.message}`);
-    }
-
-    // ✅ FALLBACK: Hardcodé sur saison 2 (évite les appels inutiles à get_club_schedule)
-    logger.warn('⚠️ Impossible de déterminer la saison dynamiquement, utilisation de la saison 2 par défaut');
-    this.currentSeasonCache = 2;
+    // ✅ FALLBACK: Hardcodé sur saison 3
+    logger.warn('⚠️ Impossible de déterminer la saison dynamiquement, utilisation de la saison 3 par défaut');
+    this.currentSeasonCache = 3;
     this.currentSeasonCacheTime = Date.now();
-    return 2;
+    return 3;
   }
 
-  // ✅ NOUVEAU: Méthode pour obtenir la saison sans faire d'appels API
+  // Méthode pour obtenir la saison sans faire d'appels API
   getCurrentSeasonCached() {
     if (this.currentSeasonCache) {
       return this.currentSeasonCache;
     }
-    return 2; // Fallback sans appel API
+    return 3; // Fallback sans appel API
   }
 
-  // ✅ NOUVEAU: Forcer le refresh du cache (admin uniquement)
+  // Forcer le refresh du cache (admin uniquement)
   async refreshCurrentSeason() {
     this.currentSeasonCache = null;
     this.currentSeasonCacheTime = null;
@@ -277,8 +279,8 @@ class ApiClient {
     }
     
     try {
-      // ✅ Essayer les deux saisons sans appeler getCurrentSeason()
-      for (const seasonId of [2, 1]) {
+      // Essayer les saisons 3 et 2
+      for (const seasonId of [3, 2]) {
         const result = await this.makeRpcRequest('get_club_schedule', {
           club_id: parseInt(clubId),
           season_id: seasonId
@@ -356,7 +358,7 @@ class ApiClient {
       throw new Error('ID de club invalide');
     }
     
-    // ✅ Utiliser le cache au lieu d'appeler l'API à chaque fois
+    // Utiliser le cache au lieu d'appeler l'API à chaque fois
     const currentSeason = this.getCurrentSeasonCached();
     
     const result = await this.makeRpcRequest('get_club_schedule', {
