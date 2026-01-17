@@ -229,8 +229,10 @@ class ClubNewsWatcher {
       96,  // Suspension
       97,  // Suspension 3 matchs (expulsion)
       98,  // Suspension (accumulation cartons jaunes)
+      242, // Pas compris 
       255, // Passage au tour suivant de la coupe
-      500, // Nouveau manager
+      350, // Ajout de places au stade sous la forme >> CLubX à ajouté X places dans son stade qui peut à présent acceuillir X spectateurs 
+      500, // Démission de  l'entraineur 
       501, // Nouvel entraineur
       504  // Entraineur dévérouillé
     ];
@@ -407,7 +409,7 @@ class ClubNewsWatcher {
         return `🏆✨ Le club est qualifié pour le tour suivant de **${cupName}** !`;
 
       case 500:
-        return `👨‍💼 **${name || 'Un nouveau manager'}** arrive comme manager.`;
+        return `👨‍💼 **${name || 'Un nouveau manager'}** a démissionné de son poste d'entraineur.`;
 
       case 501:
         return `👨‍💼 **${name || 'Un nouvel entraineur'}** arrive comme entraineur.`;
@@ -439,9 +441,9 @@ class ClubNewsWatcher {
         return '#95a5a6'; // Gris
       case 255: // Qualification coupe
         return '#f1c40f'; // Or (succès)
-      case 500: // Manager
+      case 500: // Démission
       case 501: // Entraineur
-      case 504: // Départ entraineur
+      case 504: // Dévérouillage entraineur
         return '#9b59b6'; // Violet
       default:
         return '#34495e'; // Bleu foncé
