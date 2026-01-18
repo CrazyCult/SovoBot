@@ -1,4 +1,6 @@
+
 const { EmbedBuilder } = require('discord.js');
+const LEAGUE_ROUNDS = require('./league-rounds-mapping.js');
 
 module.exports = {
   name: 'salaire',
@@ -185,21 +187,21 @@ module.exports = {
       const apiRounds = leagueInfo.round || 0;
       const matchesPerTour = numClubs - 1;  // Ex: 9 clubs = 8 adversaires
       
-      // num_rounds de l'API = nombre total de rounds dans la saison
-      const numRoundsFromAPI = leagueInfo.num_rounds || null;
+      // Récupérer num_rounds depuis le MAPPING (l'API get_league ne le retourne pas !)
+      const numRoundsFromMapping = LEAGUE_ROUNDS[leagueId] || null;
       
       let totalMatches;
       let homeMatches;
       
-      if (numRoundsFromAPI && numRoundsFromAPI > 0) {
+      if (numRoundsFromMapping && numRoundsFromMapping > 0) {
         // LOGIQUE SIMPLE : 
         // num_rounds ÷ matchesPerTour = nombre de tours complets
         // Ex: 45 rounds ÷ 8 matchs/tour = 5.625 → 5 tours
         // 5 tours × 8 matchs = 40 matchs total
-        const toursComplets = Math.floor(numRoundsFromAPI / matchesPerTour);
+        const toursComplets = Math.floor(numRoundsFromMapping / matchesPerTour);
         totalMatches = toursComplets * matchesPerTour;
         homeMatches = Math.floor(totalMatches / 2);
-        console.log(`[SALAIRE] ✅ ${numClubs} clubs : ${numRoundsFromAPI} rounds ÷ ${matchesPerTour} = ${toursComplets} tours → ${totalMatches} matchs`);
+        console.log(`[SALAIRE] ✅ Mapping league ${leagueId}: ${numRoundsFromMapping} rounds ÷ ${matchesPerTour} = ${toursComplets} tours → ${totalMatches} matchs`);
       } else if (apiRounds > matchesPerTour) {
         // L'API a des rounds réels, calculer
         const maxTours = Math.floor(apiRounds / matchesPerTour);
@@ -211,7 +213,7 @@ module.exports = {
         const maxTours = (numClubs >= 12) ? 3 : 2;
         totalMatches = maxTours * matchesPerTour;
         homeMatches = Math.floor(totalMatches / 2);
-        console.log(`[SALAIRE] ⚠️ Fallback estimation: ${totalMatches} matchs`);
+        console.log(`[SALAIRE] ⚠️ Fallback estimation (pas de mapping pour league ${leagueId}): ${totalMatches} matchs`);
       }
       
       console.log(`[SALAIRE] 📊 ${numClubs} clubs, ${matchesPerTour} matchs/tour`);
