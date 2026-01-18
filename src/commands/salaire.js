@@ -5,6 +5,68 @@ module.exports = {
   description: 'Calculer le salaire club/match cible selon la position dans la ligue',
   usage: '!salaire <club_id>',
   
+  /**
+   * Calcule le nombre de matchs par équipe via get_all_turns
+   */
+  async calculateLeagueMatches(compId, seasonId, apiClient) {
+    try {
+      // 1. Récupérer tous les tours
+      const turnsResponse = await apiClient.makeRpcRequest('get_all_turns', {
+        comp_id: parseInt(compId),
+        season_id: parseInt(seasonId)
+      });
+      
+      const turns = turnsResponse?.data || turnsResponse;
+      if (!Array.isArray(turns) || turns.length === 0) {
+        return null;
+      }
+      
+      const totalTurns = turns.length;
+      
+      // 2. Récupérer le classement pour compter les équipes
+      const rankingResponse = await apiClient.makeRpcRequest('get_ranking', {
+        comp_id: parseInt(compId),
+        season_id: parseInt(seasonId)
+      });
+      
+      const teams = rankingResponse?.data || rankingResponse;
+      if (!Array.isArray(teams) || teams.length === 0) {
+        return null;
+      }
+      
+      const nbEquipes = teams.length;
+      
+      // 3. Calculer le nombre de matchs par équipe
+      let matchsParEquipe;
+      
+      if (nbEquipes % 2 === 0) {
+        // Nombre PAIR → pas de repos
+        matchsParEquipe = totalTurns;
+      } else {
+        // Nombre IMPAIR → avec repos
+        // Formule: (nb_equipes - 1) × (total_tours / nb_equipes)
+        const rounds = totalTurns / nbEquipes;
+        matchsParEquipe = Math.floor((nbEquipes - 1) * rounds);
+      }
+      
+      const matchsDomicile = Math.floor(matchsParEquipe / 2);
+      
+      console.log(`[SALAIRE] Calcul matchs - Tours: ${totalTurns}, Équipes: ${nbEquipes}, Matchs: ${matchsParEquipe}, Domicile: ${matchsDomicile}`);
+      
+      return {
+        totalTurns,
+        nbEquipes,
+        matchsParEquipe,
+        matchsDomicile,
+        matchsExterieur: matchsParEquipe - matchsDomicile
+      };
+      
+    } catch (error) {
+      console.error('[SALAIRE] Erreur calcul matchs:', error);
+      return null;
+    }
+  },
+  
   async execute(message, args, { apiClient, dataManager }) {
     const channelId = message.channel.id;
     let clubId;
@@ -100,22 +162,16 @@ module.exports = {
     const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
 
     try {
-      // Récupérer les données du club via RPC (plus rapide que /clubs/detailed)
+      // Récupérer les données du club
       console.log(`[SALAIRE] Récupération club ${clubId}...`);
       const clubResponse = await apiClient.makeRpcRequest('get_club', { 
         club_id: clubId 
       });
       
-      console.log(`[SALAIRE] Réponse get_club:`, clubResponse);
-      
-      // Extraire .data comme les autres RPC
       const clubData = clubResponse?.data || clubResponse;
       
-      console.log(`[SALAIRE] clubData après extraction:`, clubData);
-      console.log(`[SALAIRE] clubData.club_id:`, clubData?.club_id);
-      
       if (!clubData || !clubData.club_id) {
-        console.log(`[SALAIRE] ❌ Club introuvable - clubData:`, clubData);
+        console.log(`[SALAIRE] ❌ Club introuvable`);
         throw new Error('Club introuvable');
       }
       
@@ -123,19 +179,15 @@ module.exports = {
 
       // Récupérer les données de la ligue
       const clubLeagueData = await apiClient.makeRpcRequest('get_clubs_league', { 
-        club_id: clubId  // Singulier, comme dans le HTML qui fonctionne
+        club_id: clubId
       });
       
       let leagueId = null;
-      // La réponse contient .data comme dans le HTML
       const clubLeague = clubLeagueData?.data || clubLeagueData;
       
       if (Array.isArray(clubLeague) && clubLeague.length > 0) {
-        // Si c'est un array, prendre le premier élément
-        const firstLeague = clubLeague[0];
-        leagueId = firstLeague.league_id;
+        leagueId = clubLeague[0].league_id;
       } else if (clubLeague && clubLeague.league_id) {
-        // Si c'est un objet direct
         leagueId = clubLeague.league_id;
       }
 
@@ -148,134 +200,134 @@ module.exports = {
         league_id: parseInt(leagueId) 
       });
       
-      // Extraire .data comme dans le HTML
       let leagueData = leagueResponse?.data || leagueResponse;
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
-      // Récupérer le classement
-      const leagueTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
-        league_id: parseInt(leagueId) 
-      });
-      
-      // Extraire .data comme dans le HTML qui fonctionne
-      const leagueTable = leagueTableResponse?.data || leagueTableResponse;
+      if (!leagueInfo) {
+        throw new Error('Détails de ligue introuvables');
+      }
 
-      const numClubs = Array.isArray(leagueTable) ? leagueTable.length : 20;
+      const compId = leagueInfo.comp_id;
+      const seasonId = leagueInfo.season_id;
+
+      // 🆕 NOUVEAU: Calculer le nombre de matchs automatiquement
+      const matchData = await this.calculateLeagueMatches(compId, seasonId, apiClient);
+      
+      let homeMatches, totalMatches;
+      
+      if (matchData) {
+        homeMatches = matchData.matchsDomicile;
+        totalMatches = matchData.matchsParEquipe;
+        console.log(`[SALAIRE] ✅ Matchs calculés automatiquement: ${totalMatches} (${homeMatches} domicile)`);
+      } else {
+        // Fallback: estimation basique
+        homeMatches = 14;
+        totalMatches = 28;
+        console.log(`[SALAIRE] ⚠️ Utilisation valeurs par défaut`);
+      }
+
+      // Récupérer le classement
+      const rankingResponse = await apiClient.makeRpcRequest('get_ranking', {
+        comp_id: parseInt(compId),
+        season_id: parseInt(seasonId)
+      });
+
+      const rankingData = rankingResponse?.data || rankingResponse;
+      
+      if (!Array.isArray(rankingData) || rankingData.length === 0) {
+        throw new Error('Classement introuvable');
+      }
+
+      const numClubs = rankingData.length;
       
       // Trouver la position du club
-      let clubPosition = null;
-      if (Array.isArray(leagueTable)) {
-        const clubEntry = leagueTable.find(entry => parseInt(entry.club_id) === clubId);
-        if (clubEntry) {
-          clubPosition = clubEntry.position;
+      const clubRanking = rankingData.find(club => club.club_id === clubId);
+      const currentPosition = clubRanking ? clubRanking.position : null;
+
+      // Fonction helper pour formater les salaires
+      const formatSalary = (salary) => {
+        if (salary >= 1000) {
+          return `${(salary / 1000).toFixed(1)}M$`;
         }
-      }
+        return `${salary.toFixed(1)}K$`;
+      };
 
-      // Extraire les données financières
-      const fanBase = clubData.fans_current || 0;
-      const stadiumCapacity = clubData.stadium_size_current || 0;
-      const ticketPrice = (leagueInfo.ticket_cost || 0) / 10000;
-      const tvMoney = (leagueInfo.tv_money || 0) / 10000; // Diviser par 10000 comme le HTML
+      // Calculer les salaires cibles pour différentes positions
+      const baseFans = clubData.base_fans || 1000;
+      const stadiumCapacity = clubData.stadium_capacity || 5000;
+      const ticketPrice = clubData.ticket_price || 50;
+      const tvRights = clubData.tv_rights || 50000;
 
-      // Calculer les matchs
-      const apiRounds = leagueInfo.round || 1;
-      const matchesPerTour = numClubs - 1;
-      let maxTours = Math.floor(apiRounds / matchesPerTour);
-      
-      if (maxTours === 0 && apiRounds > 0) {
-        maxTours = 2; // Saison complète par défaut
-      }
-      
-      const totalMatches = maxTours * matchesPerTour;
-      const homeMatches = totalMatches / 2;
-
-      // Fonction de calcul de salaire cible
-      const calculateTargetSalary = (position, numClubs) => {
-        const midTable = numClubs / 2;
-        let attendance = fanBase;
+      // Fonction pour calculer le salaire cible basé sur la position
+      const calculateTargetSalary = (position) => {
+        // Facteur de position (1er = 1.0, dernier = 0.3)
+        const positionFactor = 1 - ((position - 1) / numClubs) * 0.7;
         
-        if (position < midTable) {
-          const units = midTable - position;
-          const deltaFans = (fanBase / 30) * units;
-          attendance = fanBase + deltaFans;
-        } else if (position > midTable) {
-          const units = position - midTable;
-          const deltaFans = (fanBase / 30) * units;
-          attendance = fanBase - deltaFans;
-        }
+        // Calculer l'affluence estimée
+        const attendance = Math.min(
+          Math.floor(baseFans * positionFactor * 1.2),
+          stadiumCapacity
+        );
         
-        attendance = Math.round(Math.min(attendance, stadiumCapacity));
+        // Revenus par match à domicile
+        const ticketRevenue = attendance * ticketPrice;
+        const tvRevenuePerMatch = tvRights / totalMatches;
+        const merchandising = attendance * 15; // 15$ par fan en moyenne
+        const sponsoring = baseFans * 5 * positionFactor; // Sponsoring variable
         
-        const gateReceipts = (attendance * ticketPrice) * 0.8;
-        const sponsorship = (attendance * ticketPrice) * 0.3;
-        const merchandise = (attendance * ticketPrice) * 0.1;
-        const tvMoneyPerMatch = tvMoney;
+        const totalRevenuePerMatch = ticketRevenue + tvRevenuePerMatch + merchandising + sponsoring;
         
-        const totalHomeIncome = (gateReceipts + sponsorship + merchandise) * homeMatches;
-        const totalTvMoney = tvMoneyPerMatch * totalMatches;
-        const totalSeasonIncome = totalHomeIncome + totalTvMoney;
+        // Budget salaire = 50-60% des revenus selon position
+        const salaryBudgetRatio = 0.5 + (positionFactor * 0.1);
+        const targetSalary = (totalRevenuePerMatch * salaryBudgetRatio) / 1000; // En K$
         
-        const stadiumMaintenancePerMatch = 0.20 * (attendance * ticketPrice);
-        const stadiumMaintenance = stadiumMaintenancePerMatch * homeMatches;
+        // Revenus totaux pour la saison
+        const seasonIncome = (ticketRevenue * homeMatches) + tvRights + (merchandising * homeMatches);
         
-        const leagueWageEstimate = 8000000;
-        const prizePot = leagueWageEstimate * 0.12;
-        const estimatedPrizeMoney = (prizePot / numClubs) * (1 + (0.05 * (numClubs - position)));
-        
-        const totalBudgetForSalaries = (totalSeasonIncome + estimatedPrizeMoney) - stadiumMaintenance;
-        const targetClubSalaryPerMatch = totalBudgetForSalaries / totalMatches;
+        // Prime estimée selon position
+        let prize = 0;
+        if (position === 1) prize = 500000;
+        else if (position <= 3) prize = 300000;
+        else if (position <= numClubs / 2) prize = 100000;
         
         return {
-          salary: targetClubSalaryPerMatch,
-          attendance: attendance,
-          income: totalSeasonIncome,
-          prize: estimatedPrizeMoney
+          salary: targetSalary,
+          attendance,
+          income: seasonIncome / 1000,
+          prize: prize / 1000
         };
       };
 
-      // Calculer pour différentes positions
-      const firstPlace = calculateTargetSalary(1, numClubs);
-      const midTable = calculateTargetSalary(Math.ceil(numClubs / 2), numClubs);
-      const lastPlace = calculateTargetSalary(numClubs, numClubs);
-      const currentPos = clubPosition ? calculateTargetSalary(clubPosition, numClubs) : null;
+      // Calculs pour différentes positions
+      const firstPlace = calculateTargetSalary(1);
+      const midTable = calculateTargetSalary(Math.ceil(numClubs / 2));
+      const lastPlace = calculateTargetSalary(numClubs);
+      const currentPos = currentPosition ? calculateTargetSalary(currentPosition) : null;
 
-      // Fonction locale pour formater les salaires (déjà en dollars)
-      const formatSalary = (amount) => {
-        if (!amount || amount === 0) return '0$';
-        
-        if (amount >= 1000000000) {
-          return `${(amount / 1000000000).toFixed(1)}B$`;
-        } else if (amount >= 1000000) {
-          return `${(amount / 1000000).toFixed(1)}M$`;
-        } else if (amount >= 1000) {
-          return `${(amount / 1000).toFixed(1)}K$`;
-        } else {
-          return `${Math.round(amount).toLocaleString('fr-FR')}$`;
-        }
-      };
-
-      // Créer l'embed de réponse
-      const clubName = apiClient.getClubName(clubId);
-      
+      // Créer l'embed
       const embed = new EmbedBuilder()
-        .setColor('#4CAF50')
-        .setTitle(`💰 Salaires Cibles - ${clubName}`)
-        .setDescription(`Calculés pour une ligue de **${numClubs} clubs** avec **${totalMatches} matchs** au total`)
-        .addFields(
-          {
-            name: '📊 Données du Club',
-            value: 
-              `👥 Base de fans: **${fanBase.toLocaleString('fr-FR')}**\n` +
-              `🏟️ Capacité stade: **${stadiumCapacity.toLocaleString('fr-FR')}**\n` +
-              `🎫 Prix billet: **${ticketPrice.toFixed(2)} SVC**\n` +
-              `📺 Droits TV: **${(tvMoney / 1000).toFixed(1)} k SVC**/match`,
-            inline: false
-          }
+        .setColor('#FF6600')
+        .setTitle(`💰 Salaires Cibles - ${clubData.name || `Club ${clubId}`}`)
+        .setDescription(
+          `Calculés pour une ligue de **${matchData ? matchData.nbEquipes : numClubs} clubs** avec **${totalMatches} matchs** au total ` +
+          `(${homeMatches} à domicile)${matchData ? ' ✅' : ' ⚠️ estimation'}`
         );
 
-      if (currentPos && clubPosition) {
+      // Ajouter les données du club
+      embed.addFields({
+        name: '📊 Données du Club',
+        value: 
+          `👥 Base de fans: ${baseFans.toLocaleString('fr-FR')}\n` +
+          `🏟️ Capacité stade: ${stadiumCapacity.toLocaleString('fr-FR')}\n` +
+          `🎫 Prix billet: ${ticketPrice} SVC\n` +
+          `📺 Droits TV: ${formatSalary(tvRights/1000)}/match`,
+        inline: false
+      });
+
+      // Position actuelle
+      if (currentPos && currentPosition) {
         embed.addFields({
-          name: `🎯 Votre Position Actuelle (${clubPosition}${clubPosition === 1 ? 'er' : 'e'})`,
+          name: `🎯 Votre Position Actuelle (${currentPosition}${currentPosition === 1 ? 'er' : 'e'})`,
           value: 
             `💵 **Salaire cible: ${formatSalary(currentPos.salary)}/match**\n` +
             `👥 Affluence estimée: ${currentPos.attendance.toLocaleString('fr-FR')} fans\n` +
