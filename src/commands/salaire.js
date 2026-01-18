@@ -1,5 +1,4 @@
 const { EmbedBuilder } = require('discord.js');
-const LEAGUE_ROUNDS = require('./league-rounds-mapping.js');
 
 module.exports = {
   name: 'salaire',
@@ -186,37 +185,46 @@ module.exports = {
       const apiRounds = leagueInfo.round || 0;
       const matchesPerTour = numClubs - 1;
       
-      // Récupérer le nombre total de matchs depuis le mapping
-      const totalMatchesFromMapping = LEAGUE_ROUNDS[leagueId] || null;
+      // num_rounds de l'API = nombre total de "rounds" dans la saison
+      const numRoundsFromAPI = leagueInfo.num_rounds || null;
       
       let totalMatches;
-      let maxTours;
+      let homeMatches;
       
-      if (totalMatchesFromMapping) {
-        // Utiliser le mapping (source de vérité)
-        totalMatches = totalMatchesFromMapping;
-        maxTours = Math.ceil(totalMatches / matchesPerTour);
-        console.log(`[SALAIRE] ✅ Utilisation mapping: ${totalMatches} matchs (${maxTours} tours)`);
+      if (numRoundsFromAPI && numRoundsFromAPI > 0) {
+        // LOGIQUE INTELLIGENTE pour calculer les matchs réels par club
+        
+        if (numClubs % 2 === 0) {
+          // Nombre PAIR de clubs : tous les clubs jouent chaque journée
+          // Chaque club joue TOUS les rounds
+          totalMatches = numRoundsFromAPI;
+          homeMatches = Math.floor(totalMatches / 2);
+          console.log(`[SALAIRE] ✅ ${numClubs} clubs (pair) : ${totalMatches} matchs/club`);
+        } else {
+          // Nombre IMPAIR de clubs : 1 club ne joue pas chaque journée
+          // Sur numRounds rounds, chaque club a (numRounds / numClubs) journées de repos
+          // Formule : matchs_par_club = numRounds × (numClubs - 1) / numClubs
+          const matchesPerClub = Math.floor(numRoundsFromAPI * (numClubs - 1) / numClubs);
+          totalMatches = matchesPerClub;
+          homeMatches = Math.floor(totalMatches / 2);
+          console.log(`[SALAIRE] ✅ ${numClubs} clubs (impair) : ${numRoundsFromAPI} rounds → ${totalMatches} matchs/club`);
+        }
       } else if (apiRounds > matchesPerTour) {
         // L'API a des rounds réels, calculer
-        maxTours = Math.floor(apiRounds / matchesPerTour);
+        const maxTours = Math.floor(apiRounds / matchesPerTour);
         totalMatches = maxTours * matchesPerTour;
-        console.log(`[SALAIRE] ⚠️ Pas de mapping, calcul depuis API: ${totalMatches} matchs (${maxTours} tours)`);
+        homeMatches = Math.floor(totalMatches / 2);
+        console.log(`[SALAIRE] ⚠️ Calcul depuis API round: ${totalMatches} matchs`);
       } else {
         // Fallback : estimation basée sur le nombre de clubs
-        if (numClubs >= 12) {
-          maxTours = 3;
-        } else {
-          maxTours = 2;
-        }
+        const maxTours = (numClubs >= 12) ? 3 : 2;
         totalMatches = maxTours * matchesPerTour;
-        console.log(`[SALAIRE] ⚠️ Fallback estimation: ${totalMatches} matchs (${maxTours} tours)`);
+        homeMatches = Math.floor(totalMatches / 2);
+        console.log(`[SALAIRE] ⚠️ Fallback estimation: ${totalMatches} matchs`);
       }
       
-      const homeMatches = totalMatches / 2;
-      
       console.log(`[SALAIRE] 📊 ${numClubs} clubs, ${matchesPerTour} matchs/tour`);
-      console.log(`[SALAIRE] 🔢 API rounds: ${apiRounds}, matchs total: ${totalMatches} (${homeMatches} domicile)`);
+      console.log(`[SALAIRE] 🔢 Résultat final: ${totalMatches} matchs total (${homeMatches} domicile)`);
 
       // Fonction de calcul de salaire cible
       const calculateTargetSalary = (position, numClubs) => {
