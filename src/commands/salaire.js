@@ -152,6 +152,19 @@ module.exports = {
       let leagueData = leagueResponse?.data || leagueResponse;
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
+      // 🆕 Récupérer num_rounds depuis l'API REST (car pas dispo dans RPC)
+      let numRounds = 0;
+      try {
+        const restResponse = await fetch(`https://services.soccerverse.com/api/leagues/${leagueId}`);
+        if (restResponse.ok) {
+          const restData = await restResponse.json();
+          numRounds = restData.num_rounds || 0;
+          console.log(`[SALAIRE] 📡 num_rounds depuis API REST: ${numRounds}`);
+        }
+      } catch (error) {
+        console.log(`[SALAIRE] ⚠️ Impossible de récupérer num_rounds depuis API REST`);
+      }
+
       // Récupérer le classement
       const leagueTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
         league_id: parseInt(leagueId) 
@@ -183,7 +196,6 @@ module.exports = {
       const matchesPerTour = numClubs - 1;
       
       // Calculer combien de tours chaque équipe va jouer
-      const numRounds = leagueInfo.num_rounds || 0;
       let numberOfTours;
       
       if (numRounds > 0) {
