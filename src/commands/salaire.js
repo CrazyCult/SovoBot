@@ -50,10 +50,8 @@ module.exports = {
         return;
       }
 
-      // Si plusieurs clubs inscrits, prendre le premier
       clubId = parseInt(registeredClubs[0]);
       
-      // Si plus d'un club inscrit, afficher un message informatif
       if (registeredClubs.length > 1) {
         const clubNames = [];
         for (const id of registeredClubs.slice(0, 3)) {
@@ -100,42 +98,29 @@ module.exports = {
     const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
 
     try {
-      // Récupérer les données du club via RPC (plus rapide que /clubs/detailed)
+      // Récupérer les données du club
       console.log(`[SALAIRE] Récupération club ${clubId}...`);
       const clubResponse = await apiClient.makeRpcRequest('get_club', { 
         club_id: clubId 
       });
       
-      console.log(`[SALAIRE] Réponse get_club:`, clubResponse);
-      
-      // Extraire .data comme les autres RPC
       const clubData = clubResponse?.data || clubResponse;
       
-      console.log(`[SALAIRE] clubData après extraction:`, clubData);
-      console.log(`[SALAIRE] clubData.club_id:`, clubData?.club_id);
-      
       if (!clubData || !clubData.club_id) {
-        console.log(`[SALAIRE] ❌ Club introuvable - clubData:`, clubData);
         throw new Error('Club introuvable');
       }
-      
-      console.log(`[SALAIRE] ✅ Club trouvé:`, clubData.club_id);
 
       // Récupérer les données de la ligue
       const clubLeagueData = await apiClient.makeRpcRequest('get_clubs_league', { 
-        club_id: clubId  // Singulier, comme dans le HTML qui fonctionne
+        club_id: clubId
       });
       
       let leagueId = null;
-      // La réponse contient .data comme dans le HTML
       const clubLeague = clubLeagueData?.data || clubLeagueData;
       
       if (Array.isArray(clubLeague) && clubLeague.length > 0) {
-        // Si c'est un array, prendre le premier élément
-        const firstLeague = clubLeague[0];
-        leagueId = firstLeague.league_id;
+        leagueId = clubLeague[0].league_id;
       } else if (clubLeague && clubLeague.league_id) {
-        // Si c'est un objet direct
         leagueId = clubLeague.league_id;
       }
 
@@ -148,76 +133,51 @@ module.exports = {
         league_id: parseInt(leagueId) 
       });
       
-      // Extraire .data comme dans le HTML
       let leagueData = leagueResponse?.data || leagueResponse;
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
-      // Récupérer le classement actuel pour la position du club
-      const leagueTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
+      // ============= SIMPLE: Récupérer la SAISON 1 =============
+      console.log(`[SALAIRE] Récupération classement saison 1 pour league ${leagueId}...`);
+      
+      const season1TableResponse = await apiClient.makeRpcRequest('get_league_table', { 
+        league_id: parseInt(leagueId),
+        season_id: 1
+      });
+      
+      const season1Table = season1TableResponse?.data || season1TableResponse;
+      
+      if (!Array.isArray(season1Table) || season1Table.length === 0) {
+        throw new Error('Impossible de récupérer le classement de la saison 1');
+      }
+      
+      // Compter les clubs et prendre le nombre de matchs joués
+      const numClubs = season1Table.length;
+      const totalMatches = season1Table[0].played || 0;
+      const homeMatches = totalMatches / 2;
+      
+      console.log(`[SALAIRE] ✅ Saison 1: ${numClubs} clubs, ${totalMatches} matchs (${homeMatches} à domicile)`);
+      
+      // Récupérer le classement ACTUEL juste pour la position du club
+      const currentTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
         league_id: parseInt(leagueId) 
       });
       
-      // Extraire .data comme dans le HTML qui fonctionne
-      const leagueTable = leagueTableResponse?.data || leagueTableResponse;
-
-      const numClubs = Array.isArray(leagueTable) ? leagueTable.length : 20;
+      const currentTable = currentTableResponse?.data || currentTableResponse;
       
       // Trouver la position actuelle du club
       let clubPosition = null;
-      if (Array.isArray(leagueTable)) {
-        const clubEntry = leagueTable.find(entry => parseInt(entry.club_id) === clubId);
+      if (Array.isArray(currentTable)) {
+        const clubEntry = currentTable.find(entry => parseInt(entry.club_id) === clubId);
         if (clubEntry) {
           clubPosition = clubEntry.position;
         }
       }
-      
-      // Récupérer toutes les saisons pour trouver la saison 1
-      console.log(`[SALAIRE] Récupération des saisons...`);
-      const seasonsResponse = await apiClient.makeRpcRequest('get_seasons', {});
-      const seasons = seasonsResponse?.data || seasonsResponse;
-      
-      console.log(`[SALAIRE] Saisons récupérées:`, seasons?.length);
-      
-      let totalMatches = 0;
-      
-      // Chercher la saison 1 dans la liste des saisons
-      if (Array.isArray(seasons) && seasons.length > 0) {
-        const season1 = seasons.find(s => s.season_id === 1);
-        
-        if (season1) {
-          console.log(`[SALAIRE] Saison 1 trouvée:`, season1);
-          
-          // Récupérer le classement de la saison 1 pour cette ligue
-          const season1TableResponse = await apiClient.makeRpcRequest('get_league_table', { 
-            league_id: parseInt(leagueId),
-            season_id: 1
-          });
-          
-          const season1Table = season1TableResponse?.data || season1TableResponse;
-          
-          if (Array.isArray(season1Table) && season1Table.length > 0) {
-            // Prendre le nombre de matchs joués par le premier club
-            totalMatches = season1Table[0].played || 0;
-            console.log(`[SALAIRE] Matchs joués en saison 1: ${totalMatches}`);
-          }
-        }
-      }
-      
-      // Si toujours 0, calculer avec la formule standard (aller-retour)
-      if (totalMatches === 0 || totalMatches < 10) {
-        console.log(`[SALAIRE] Fallback sur formule standard - numClubs: ${numClubs}`);
-        totalMatches = (numClubs - 1) * 2; // Formule standard: chaque club joue contre tous les autres (aller-retour)
-        console.log(`[SALAIRE] Total matchs calculé: ${totalMatches}`);
-      }
-      
-      // Les matchs à domicile sont la moitié du total
-      const homeMatches = totalMatches / 2;
 
       // Extraire les données financières
       const fanBase = clubData.fans_current || 0;
       const stadiumCapacity = clubData.stadium_size_current || 0;
       const ticketPrice = (leagueInfo.ticket_cost || 0) / 10000;
-      const tvMoney = (leagueInfo.tv_money || 0) / 10000; // Diviser par 10000 comme le HTML
+      const tvMoney = (leagueInfo.tv_money || 0) / 10000;
 
       // Fonction de calcul de salaire cible
       const calculateTargetSalary = (position, numClubs) => {
@@ -269,7 +229,7 @@ module.exports = {
       const lastPlace = calculateTargetSalary(numClubs, numClubs);
       const currentPos = clubPosition ? calculateTargetSalary(clubPosition, numClubs) : null;
 
-      // Fonction locale pour formater les salaires (déjà en dollars)
+      // Fonction pour formater les salaires
       const formatSalary = (amount) => {
         if (!amount || amount === 0) return '0$';
         
