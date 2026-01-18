@@ -183,32 +183,23 @@ module.exports = {
 
       // Calculer les matchs
       const apiRounds = leagueInfo.round || 0;
-      const matchesPerTour = numClubs - 1;
+      const matchesPerTour = numClubs - 1;  // Ex: 9 clubs = 8 adversaires
       
-      // num_rounds de l'API = nombre total de "rounds" dans la saison
+      // num_rounds de l'API = nombre total de rounds dans la saison
       const numRoundsFromAPI = leagueInfo.num_rounds || null;
       
       let totalMatches;
       let homeMatches;
       
       if (numRoundsFromAPI && numRoundsFromAPI > 0) {
-        // LOGIQUE INTELLIGENTE pour calculer les matchs réels par club
-        
-        if (numClubs % 2 === 0) {
-          // Nombre PAIR de clubs : tous les clubs jouent chaque journée
-          // Chaque club joue TOUS les rounds
-          totalMatches = numRoundsFromAPI;
-          homeMatches = Math.floor(totalMatches / 2);
-          console.log(`[SALAIRE] ✅ ${numClubs} clubs (pair) : ${totalMatches} matchs/club`);
-        } else {
-          // Nombre IMPAIR de clubs : 1 club ne joue pas chaque journée
-          // Sur numRounds rounds, chaque club a (numRounds / numClubs) journées de repos
-          // Formule : matchs_par_club = numRounds × (numClubs - 1) / numClubs
-          const matchesPerClub = Math.floor(numRoundsFromAPI * (numClubs - 1) / numClubs);
-          totalMatches = matchesPerClub;
-          homeMatches = Math.floor(totalMatches / 2);
-          console.log(`[SALAIRE] ✅ ${numClubs} clubs (impair) : ${numRoundsFromAPI} rounds → ${totalMatches} matchs/club`);
-        }
+        // LOGIQUE SIMPLE : 
+        // num_rounds ÷ matchesPerTour = nombre de tours complets
+        // Ex: 45 rounds ÷ 8 matchs/tour = 5.625 → 5 tours
+        // 5 tours × 8 matchs = 40 matchs total
+        const toursComplets = Math.floor(numRoundsFromAPI / matchesPerTour);
+        totalMatches = toursComplets * matchesPerTour;
+        homeMatches = Math.floor(totalMatches / 2);
+        console.log(`[SALAIRE] ✅ ${numClubs} clubs : ${numRoundsFromAPI} rounds ÷ ${matchesPerTour} = ${toursComplets} tours → ${totalMatches} matchs`);
       } else if (apiRounds > matchesPerTour) {
         // L'API a des rounds réels, calculer
         const maxTours = Math.floor(apiRounds / matchesPerTour);
