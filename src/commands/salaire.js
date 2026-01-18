@@ -171,24 +171,43 @@ module.exports = {
         }
       }
       
-      // Récupérer le classement de la SAISON 1 pour avoir le nombre de matchs de référence
-      // La saison 1 est toujours complète, elle sert de référence
-      const season1TableResponse = await apiClient.makeRpcRequest('get_league_table', { 
-        league_id: parseInt(leagueId),
-        season_id: 1  // Saison 1 comme référence
-      });
+      // Récupérer toutes les saisons pour trouver la saison 1
+      console.log(`[SALAIRE] Récupération des saisons...`);
+      const seasonsResponse = await apiClient.makeRpcRequest('get_seasons', {});
+      const seasons = seasonsResponse?.data || seasonsResponse;
       
-      const season1Table = season1TableResponse?.data || season1TableResponse;
+      console.log(`[SALAIRE] Saisons récupérées:`, seasons?.length);
       
       let totalMatches = 0;
-      if (Array.isArray(season1Table) && season1Table.length > 0) {
-        // Prendre le nombre de matchs joués par le premier club de la saison 1
-        totalMatches = season1Table[0].played || 0;
+      
+      // Chercher la saison 1 dans la liste des saisons
+      if (Array.isArray(seasons) && seasons.length > 0) {
+        const season1 = seasons.find(s => s.season_id === 1);
+        
+        if (season1) {
+          console.log(`[SALAIRE] Saison 1 trouvée:`, season1);
+          
+          // Récupérer le classement de la saison 1 pour cette ligue
+          const season1TableResponse = await apiClient.makeRpcRequest('get_league_table', { 
+            league_id: parseInt(leagueId),
+            season_id: 1
+          });
+          
+          const season1Table = season1TableResponse?.data || season1TableResponse;
+          
+          if (Array.isArray(season1Table) && season1Table.length > 0) {
+            // Prendre le nombre de matchs joués par le premier club
+            totalMatches = season1Table[0].played || 0;
+            console.log(`[SALAIRE] Matchs joués en saison 1: ${totalMatches}`);
+          }
+        }
       }
       
       // Si toujours 0, calculer avec la formule standard (aller-retour)
-      if (totalMatches === 0) {
+      if (totalMatches === 0 || totalMatches < 10) {
+        console.log(`[SALAIRE] Fallback sur formule standard - numClubs: ${numClubs}`);
         totalMatches = (numClubs - 1) * 2; // Formule standard: chaque club joue contre tous les autres (aller-retour)
+        console.log(`[SALAIRE] Total matchs calculé: ${totalMatches}`);
       }
       
       // Les matchs à domicile sont la moitié du total
