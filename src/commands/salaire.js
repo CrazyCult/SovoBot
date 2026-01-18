@@ -50,8 +50,10 @@ module.exports = {
         return;
       }
 
+      // Si plusieurs clubs inscrits, prendre le premier
       clubId = parseInt(registeredClubs[0]);
       
+      // Si plus d'un club inscrit, afficher un message informatif
       if (registeredClubs.length > 1) {
         const clubNames = [];
         for (const id of registeredClubs.slice(0, 3)) {
@@ -98,29 +100,42 @@ module.exports = {
     const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
 
     try {
-      // Récupérer les données du club
+      // Récupérer les données du club via RPC (plus rapide que /clubs/detailed)
       console.log(`[SALAIRE] Récupération club ${clubId}...`);
       const clubResponse = await apiClient.makeRpcRequest('get_club', { 
         club_id: clubId 
       });
       
+      console.log(`[SALAIRE] Réponse get_club:`, clubResponse);
+      
+      // Extraire .data comme les autres RPC
       const clubData = clubResponse?.data || clubResponse;
       
+      console.log(`[SALAIRE] clubData après extraction:`, clubData);
+      console.log(`[SALAIRE] clubData.club_id:`, clubData?.club_id);
+      
       if (!clubData || !clubData.club_id) {
+        console.log(`[SALAIRE] ❌ Club introuvable - clubData:`, clubData);
         throw new Error('Club introuvable');
       }
+      
+      console.log(`[SALAIRE] ✅ Club trouvé:`, clubData.club_id);
 
       // Récupérer les données de la ligue
       const clubLeagueData = await apiClient.makeRpcRequest('get_clubs_league', { 
-        club_id: clubId
+        club_id: clubId  // Singulier, comme dans le HTML qui fonctionne
       });
       
       let leagueId = null;
+      // La réponse contient .data comme dans le HTML
       const clubLeague = clubLeagueData?.data || clubLeagueData;
       
       if (Array.isArray(clubLeague) && clubLeague.length > 0) {
-        leagueId = clubLeague[0].league_id;
+        // Si c'est un array, prendre le premier élément
+        const firstLeague = clubLeague[0];
+        leagueId = firstLeague.league_id;
       } else if (clubLeague && clubLeague.league_id) {
+        // Si c'est un objet direct
         leagueId = clubLeague.league_id;
       }
 
@@ -133,41 +148,24 @@ module.exports = {
         league_id: parseInt(leagueId) 
       });
       
+      // Extraire .data comme dans le HTML
       let leagueData = leagueResponse?.data || leagueResponse;
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
-      // ============= SIMPLE: Récupérer la SAISON 1 =============
-      console.log(`[SALAIRE] Récupération classement saison 1 pour league ${leagueId}...`);
-      
-      const season1TableResponse = await apiClient.makeRpcRequest('get_league_table', { 
-        league_id: parseInt(leagueId),
-        season_id: 1
-      });
-      
-      const season1Table = season1TableResponse?.data || season1TableResponse;
-      
-      if (!Array.isArray(season1Table) || season1Table.length === 0) {
-        throw new Error('Impossible de récupérer le classement de la saison 1');
-      }
-      
-      // Compter les clubs et prendre le nombre de matchs joués
-      const numClubs = season1Table.length;
-      const totalMatches = season1Table[0].played || 0;
-      const homeMatches = totalMatches / 2;
-      
-      console.log(`[SALAIRE] ✅ Saison 1: ${numClubs} clubs, ${totalMatches} matchs (${homeMatches} à domicile)`);
-      
-      // Récupérer le classement ACTUEL juste pour la position du club
-      const currentTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
+      // Récupérer le classement
+      const leagueTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
         league_id: parseInt(leagueId) 
       });
       
-      const currentTable = currentTableResponse?.data || currentTableResponse;
+      // Extraire .data comme dans le HTML qui fonctionne
+      const leagueTable = leagueTableResponse?.data || leagueTableResponse;
+
+      const numClubs = Array.isArray(leagueTable) ? leagueTable.length : 20;
       
-      // Trouver la position actuelle du club
+      // Trouver la position du club
       let clubPosition = null;
-      if (Array.isArray(currentTable)) {
-        const clubEntry = currentTable.find(entry => parseInt(entry.club_id) === clubId);
+      if (Array.isArray(leagueTable)) {
+        const clubEntry = leagueTable.find(entry => parseInt(entry.club_id) === clubId);
         if (clubEntry) {
           clubPosition = clubEntry.position;
         }
@@ -178,6 +176,30 @@ module.exports = {
       const stadiumCapacity = clubData.stadium_size_current || 0;
       const ticketPrice = (leagueInfo.ticket_cost || 0) / 10000;
       const tvMoney = (leagueInfo.tv_money || 0) / 10000;
+
+      // Calculer le nombre de matchs par équipe
+      // num_rounds = nombre TOTAL de tours du championnat
+      // Chaque équipe joue (numClubs - 1) matchs par tour complet
+      const matchesPerTour = numClubs - 1;
+      
+      // Calculer combien de tours chaque équipe va jouer
+      const numRounds = leagueInfo.num_rounds || 0;
+      let numberOfTours;
+      
+      if (numRounds > 0) {
+        // Arrondir au nombre de tours le plus proche
+        numberOfTours = Math.round(numRounds / matchesPerTour);
+      } else {
+        // Fallback: 2 tours (aller-retour standard)
+        numberOfTours = 2;
+      }
+      
+      const totalMatches = matchesPerTour * numberOfTours;
+      const homeMatches = totalMatches / 2;
+      
+      console.log(`[SALAIRE] 📊 ${numClubs} clubs, ${matchesPerTour} matchs/tour`);
+      console.log(`[SALAIRE] 🔢 num_rounds API: ${numRounds}, tours calculés: ${numberOfTours}`);
+      console.log(`[SALAIRE] ✅ ${totalMatches} matchs total (${homeMatches} à domicile)`);
 
       // Fonction de calcul de salaire cible
       const calculateTargetSalary = (position, numClubs) => {
@@ -229,7 +251,7 @@ module.exports = {
       const lastPlace = calculateTargetSalary(numClubs, numClubs);
       const currentPos = clubPosition ? calculateTargetSalary(clubPosition, numClubs) : null;
 
-      // Fonction pour formater les salaires
+      // Fonction locale pour formater les salaires (déjà en dollars)
       const formatSalary = (amount) => {
         if (!amount || amount === 0) return '0$';
         
@@ -250,10 +272,7 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor('#4CAF50')
         .setTitle(`💰 Salaires Cibles - ${clubName}`)
-        .setDescription(
-          `Calculés pour une ligue de **${numClubs} clubs**\n` +
-          `⚽ **${totalMatches} matchs** au total (${homeMatches} à domicile)`
-        )
+        .setDescription(`Calculés pour une ligue de **${numClubs} clubs** avec **${totalMatches} matchs** au total`)
         .addFields(
           {
             name: '📊 Données du Club',
@@ -305,7 +324,7 @@ module.exports = {
       embed.addFields({
         name: '💡 Recommandation',
         value: 
-          `Avec **${homeMatches} matchs à domicile** et **${totalMatches} matchs au total**, ` +
+          `Avec ${homeMatches} matchs à domicile et ${totalMatches} matchs au total, ` +
           `visez un salaire club total proche de ces valeurs selon votre position dans le classement.`,
         inline: false
       });
