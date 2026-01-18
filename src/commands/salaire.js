@@ -1,4 +1,5 @@
 const { EmbedBuilder } = require('discord.js');
+const LEAGUE_ROUNDS = require('./league-rounds-mapping.js');
 
 module.exports = {
   name: 'salaire',
@@ -148,22 +149,13 @@ module.exports = {
         league_id: parseInt(leagueId) 
       });
       
+      console.log('[SALAIRE] 📋 RÉPONSE COMPLÈTE get_league:', JSON.stringify(leagueResponse, null, 2));
+      
       // Extraire .data comme dans le HTML
       let leagueData = leagueResponse?.data || leagueResponse;
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
-
-      // 🆕 Récupérer num_rounds depuis l'API REST (car pas dispo dans RPC)
-      let numRounds = 0;
-      try {
-        const restResponse = await fetch(`https://services.soccerverse.com/api/leagues/${leagueId}`);
-        if (restResponse.ok) {
-          const restData = await restResponse.json();
-          numRounds = restData.num_rounds || 0;
-          console.log(`[SALAIRE] 📡 num_rounds depuis API REST: ${numRounds}`);
-        }
-      } catch (error) {
-        console.log(`[SALAIRE] ⚠️ Impossible de récupérer num_rounds depuis API REST`);
-      }
+      
+      console.log('[SALAIRE] 📋 leagueInfo FINAL:', JSON.stringify(leagueInfo, null, 2));
 
       // Récupérer le classement
       const leagueTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
@@ -188,30 +180,43 @@ module.exports = {
       const fanBase = clubData.fans_current || 0;
       const stadiumCapacity = clubData.stadium_size_current || 0;
       const ticketPrice = (leagueInfo.ticket_cost || 0) / 10000;
-      const tvMoney = (leagueInfo.tv_money || 0) / 10000;
+      const tvMoney = (leagueInfo.tv_money || 0) / 10000; // Diviser par 10000 comme le HTML
 
-      // Calculer le nombre de matchs par équipe
-      // num_rounds = nombre TOTAL de tours du championnat
-      // Chaque équipe joue (numClubs - 1) matchs par tour complet
+      // Calculer les matchs
+      const apiRounds = leagueInfo.round || 0;
       const matchesPerTour = numClubs - 1;
       
-      // Calculer combien de tours chaque équipe va jouer
-      let numberOfTours;
+      // Récupérer le nombre total de matchs depuis le mapping
+      const totalMatchesFromMapping = LEAGUE_ROUNDS[leagueId] || null;
       
-      if (numRounds > 0) {
-        // Arrondir au nombre de tours le plus proche
-        numberOfTours = Math.round(numRounds / matchesPerTour);
+      let totalMatches;
+      let maxTours;
+      
+      if (totalMatchesFromMapping) {
+        // Utiliser le mapping (source de vérité)
+        totalMatches = totalMatchesFromMapping;
+        maxTours = Math.ceil(totalMatches / matchesPerTour);
+        console.log(`[SALAIRE] ✅ Utilisation mapping: ${totalMatches} matchs (${maxTours} tours)`);
+      } else if (apiRounds > matchesPerTour) {
+        // L'API a des rounds réels, calculer
+        maxTours = Math.floor(apiRounds / matchesPerTour);
+        totalMatches = maxTours * matchesPerTour;
+        console.log(`[SALAIRE] ⚠️ Pas de mapping, calcul depuis API: ${totalMatches} matchs (${maxTours} tours)`);
       } else {
-        // Fallback: 2 tours (aller-retour standard)
-        numberOfTours = 2;
+        // Fallback : estimation basée sur le nombre de clubs
+        if (numClubs >= 12) {
+          maxTours = 3;
+        } else {
+          maxTours = 2;
+        }
+        totalMatches = maxTours * matchesPerTour;
+        console.log(`[SALAIRE] ⚠️ Fallback estimation: ${totalMatches} matchs (${maxTours} tours)`);
       }
       
-      const totalMatches = matchesPerTour * numberOfTours;
       const homeMatches = totalMatches / 2;
       
       console.log(`[SALAIRE] 📊 ${numClubs} clubs, ${matchesPerTour} matchs/tour`);
-      console.log(`[SALAIRE] 🔢 num_rounds API: ${numRounds}, tours calculés: ${numberOfTours}`);
-      console.log(`[SALAIRE] ✅ ${totalMatches} matchs total (${homeMatches} à domicile)`);
+      console.log(`[SALAIRE] 🔢 API rounds: ${apiRounds}, matchs total: ${totalMatches} (${homeMatches} domicile)`);
 
       // Fonction de calcul de salaire cible
       const calculateTargetSalary = (position, numClubs) => {
