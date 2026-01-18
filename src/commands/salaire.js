@@ -152,7 +152,7 @@ module.exports = {
       let leagueData = leagueResponse?.data || leagueResponse;
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
-      // Récupérer le classement
+      // Récupérer le classement actuel pour la position du club
       const leagueTableResponse = await apiClient.makeRpcRequest('get_league_table', { 
         league_id: parseInt(leagueId) 
       });
@@ -162,7 +162,7 @@ module.exports = {
 
       const numClubs = Array.isArray(leagueTable) ? leagueTable.length : 20;
       
-      // Trouver la position du club
+      // Trouver la position actuelle du club
       let clubPosition = null;
       if (Array.isArray(leagueTable)) {
         const clubEntry = leagueTable.find(entry => parseInt(entry.club_id) === clubId);
@@ -170,24 +170,35 @@ module.exports = {
           clubPosition = clubEntry.position;
         }
       }
+      
+      // Récupérer le classement de la SAISON 1 pour avoir le nombre de matchs de référence
+      // La saison 1 est toujours complète, elle sert de référence
+      const season1TableResponse = await apiClient.makeRpcRequest('get_league_table', { 
+        league_id: parseInt(leagueId),
+        season_id: 1  // Saison 1 comme référence
+      });
+      
+      const season1Table = season1TableResponse?.data || season1TableResponse;
+      
+      let totalMatches = 0;
+      if (Array.isArray(season1Table) && season1Table.length > 0) {
+        // Prendre le nombre de matchs joués par le premier club de la saison 1
+        totalMatches = season1Table[0].played || 0;
+      }
+      
+      // Si toujours 0, calculer avec la formule standard (aller-retour)
+      if (totalMatches === 0) {
+        totalMatches = (numClubs - 1) * 2; // Formule standard: chaque club joue contre tous les autres (aller-retour)
+      }
+      
+      // Les matchs à domicile sont la moitié du total
+      const homeMatches = totalMatches / 2;
 
       // Extraire les données financières
       const fanBase = clubData.fans_current || 0;
       const stadiumCapacity = clubData.stadium_size_current || 0;
       const ticketPrice = (leagueInfo.ticket_cost || 0) / 10000;
       const tvMoney = (leagueInfo.tv_money || 0) / 10000; // Diviser par 10000 comme le HTML
-
-      // Calculer les matchs
-      const apiRounds = leagueInfo.round || 1;
-      const matchesPerTour = numClubs - 1;
-      let maxTours = Math.floor(apiRounds / matchesPerTour);
-      
-      if (maxTours === 0 && apiRounds > 0) {
-        maxTours = 2; // Saison complète par défaut
-      }
-      
-      const totalMatches = maxTours * matchesPerTour;
-      const homeMatches = totalMatches / 2;
 
       // Fonction de calcul de salaire cible
       const calculateTargetSalary = (position, numClubs) => {
@@ -260,7 +271,10 @@ module.exports = {
       const embed = new EmbedBuilder()
         .setColor('#4CAF50')
         .setTitle(`💰 Salaires Cibles - ${clubName}`)
-        .setDescription(`Calculés pour une ligue de **${numClubs} clubs** avec **${totalMatches} matchs** au total`)
+        .setDescription(
+          `Calculés pour une ligue de **${numClubs} clubs**\n` +
+          `⚽ **${totalMatches} matchs** au total (${homeMatches} à domicile)`
+        )
         .addFields(
           {
             name: '📊 Données du Club',
@@ -312,7 +326,7 @@ module.exports = {
       embed.addFields({
         name: '💡 Recommandation',
         value: 
-          `Avec ${homeMatches} matchs à domicile et ${totalMatches} matchs au total, ` +
+          `Avec **${homeMatches} matchs à domicile** et **${totalMatches} matchs au total**, ` +
           `visez un salaire club total proche de ces valeurs selon votre position dans le classement.`,
         inline: false
       });
