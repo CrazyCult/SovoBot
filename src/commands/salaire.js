@@ -12,29 +12,31 @@ module.exports = {
     try {
       // 1. Récupérer tous les tours
       const turnsResponse = await apiClient.makeRpcRequest('get_all_turns', {
-        comp_id: parseInt(compId),
-        season_id: parseInt(seasonId)
+        comp_id: compId,
+        season_id: seasonId
       });
       
-      const turns = turnsResponse?.data || turnsResponse;
-      if (!Array.isArray(turns) || turns.length === 0) {
+      // La réponse contient result.data
+      const turnsData = turnsResponse?.result?.data || turnsResponse?.data || turnsResponse;
+      if (!Array.isArray(turnsData) || turnsData.length === 0) {
         return null;
       }
       
-      const totalTurns = turns.length;
+      const totalTurns = turnsData.length;
       
       // 2. Récupérer le classement pour compter les équipes
-      const rankingResponse = await apiClient.makeRpcRequest('get_ranking', {
-        comp_id: parseInt(compId),
-        season_id: parseInt(seasonId)
+      // Utiliser get_standings qui existe vraiment
+      const rankingResponse = await apiClient.makeRpcRequest('get_standings', {
+        comp_id: compId,
+        season_id: seasonId
       });
       
-      const teams = rankingResponse?.data || rankingResponse;
-      if (!Array.isArray(teams) || teams.length === 0) {
+      const teamsData = rankingResponse?.result?.data || rankingResponse?.data || rankingResponse;
+      if (!Array.isArray(teamsData) || teamsData.length === 0) {
         return null;
       }
       
-      const nbEquipes = teams.length;
+      const nbEquipes = teamsData.length;
       
       // 3. Calculer le nombre de matchs par équipe
       let matchsParEquipe;
@@ -227,12 +229,12 @@ module.exports = {
       }
 
       // Récupérer le classement
-      const rankingResponse = await apiClient.makeRpcRequest('get_ranking', {
-        comp_id: parseInt(compId),
-        season_id: parseInt(seasonId)
+      const rankingResponse = await apiClient.makeRpcRequest('get_standings', {
+        comp_id: compId,
+        season_id: seasonId
       });
 
-      const rankingData = rankingResponse?.data || rankingResponse;
+      const rankingData = rankingResponse?.result?.data || rankingResponse?.data || rankingResponse;
       
       if (!Array.isArray(rankingData) || rankingData.length === 0) {
         throw new Error('Classement introuvable');
