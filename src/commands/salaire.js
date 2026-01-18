@@ -5,168 +5,54 @@ module.exports = {
   description: 'Calculer le salaire club/match cible selon la position dans la ligue',
   usage: '!salaire <club_id>',
   
-  /**
-   * Calcule le nombre de matchs par équipe en comptant les équipes réelles
-   */
-  async calculateLeagueMatches(compId, seasonId, apiClient) {
-    try {
-      // 1. Récupérer tous les tours
-      const turnsResponse = await apiClient.makeRpcRequest('get_all_turns', {
-        comp_id: compId,
-        season_id: seasonId
-      });
-      
-      const result = turnsResponse?.result || turnsResponse;
-      const turnsData = result?.data || result;
-      
-      if (!Array.isArray(turnsData) || turnsData.length === 0) {
-        console.log('[SALAIRE] Pas de tours trouvés');
-        return null;
-      }
-      
-      const totalTurns = turnsData.length;
-      const firstTurnId = turnsData[0].turn_id;
-      
-      console.log(`[SALAIRE] ${totalTurns} tours trouvés, analyse du tour ${firstTurnId}`);
-      
-      // 2. Récupérer les matchs du 1er tour pour compter les équipes
-      const matchesResponse = await apiClient.makeRpcRequest('get_matches', {
-        turn_id: firstTurnId
-      });
-      
-      const matchesResult = matchesResponse?.result || matchesResponse;
-      const matchesData = matchesResult?.data || matchesResult;
-      
-      let nbEquipes;
-      
-      if (Array.isArray(matchesData) && matchesData.length > 0) {
-        const matchesInTurn = matchesData.length;
-        // Nombre d'équipes = matchs × 2 (si tous jouent) ou matchs × 2 + 1 (si 1 au repos)
-        nbEquipes = (matchesInTurn * 2) + 1; // On assume nombre impair par défaut
-        console.log(`[SALAIRE] ${matchesInTurn} matchs au tour 1 → ${nbEquipes} équipes estimées`);
-      } else {
-        // Fallback si pas de matchs
-        console.log('[SALAIRE] Pas de matchs trouvés, estimation par tours');
-        nbEquipes = Math.round((totalTurns / 2) + 1);
-      }
-      
-      // 3. Calculer le nombre de matchs par équipe
-      let matchsParEquipe;
-      
-      if (nbEquipes % 2 === 0) {
-        // Nombre PAIR → pas de repos, chaque tour = 1 match
-        matchsParEquipe = totalTurns;
-        console.log(`[SALAIRE] ${nbEquipes} équipes (PAIR) → ${matchsParEquipe} matchs`);
-      } else {
-        // Nombre IMPAIR → une équipe au repos chaque tour
-        // Formule: matchs = (nb_equipes - 1) × (tours / nb_equipes)
-        const rounds = totalTurns / nbEquipes;
-        matchsParEquipe = Math.floor((nbEquipes - 1) * rounds);
-        console.log(`[SALAIRE] ${nbEquipes} équipes (IMPAIR) → ${rounds.toFixed(1)} rounds → ${matchsParEquipe} matchs`);
-      }
-      
-      const matchsDomicile = Math.floor(matchsParEquipe / 2);
-      
-      console.log(`[SALAIRE] RÉSULTAT: ${totalTurns} tours, ${nbEquipes} équipes, ${matchsParEquipe} matchs (${matchsDomicile} domicile)`);
-      
-      return {
-        totalTurns,
-        nbEquipes: Math.floor(nbEquipes),
-        matchsParEquipe,
-        matchsDomicile,
-        matchsExterieur: matchsParEquipe - matchsDomicile
-      };
-      
-    } catch (error) {
-      console.error('[SALAIRE] Erreur calcul matchs:', error);
-      return null;
-    }
-  },
-  
   async execute(message, args, { apiClient, dataManager }) {
-    const channelId = message.channel.id;
-    let clubId;
-
-    // Si aucun argument, utiliser les clubs enregistrés
+    // Vérifier qu'un ID de club est fourni
     if (args.length === 0) {
-      const registeredClubs = dataManager.getChannelClubs(channelId);
+      const embed = new EmbedBuilder()
+        .setColor('#FFA500')
+        .setTitle('💰 Calculateur de Salaire Cible')
+        .setDescription('Calculez le salaire club/match recommandé selon votre position dans la ligue.')
+        .addFields(
+          {
+            name: '💡 Usage',
+            value: '`!salaire <club_id>`',
+            inline: false
+          },
+          {
+            name: '📝 Exemple',
+            value: '`!salaire 3227`',
+            inline: false
+          },
+          {
+            name: '📊 Informations affichées',
+            value: 
+              '• Salaire cible pour votre position actuelle\n' +
+              '• Salaire pour le 1er du classement\n' +
+              '• Salaire pour le milieu de tableau\n' +
+              '• Salaire pour le dernier du classement',
+            inline: false
+          }
+        )
+        .setFooter({ text: 'Soccerverse Bot v3.0' });
       
-      if (registeredClubs.length === 0) {
-        const embed = new EmbedBuilder()
-          .setColor('#FFA500')
-          .setTitle('💰 Aucun club inscrit')
-          .setDescription('Ce salon n\'a aucun club inscrit aux notifications.')
-          .addFields(
-            {
-              name: '💡 Usage',
-              value: '• `!salaire` - Salaires du club inscrit\n• `!salaire <club_id>` - Salaires d\'un club spécifique',
-              inline: false
-            },
-            {
-              name: '📝 Exemple',
-              value: '`!salaire 3227`',
-              inline: false
-            },
-            {
-              name: '📊 Informations affichées',
-              value: 
-                '• Salaire cible pour votre position actuelle\n' +
-                '• Salaire pour le 1er du classement\n' +
-                '• Salaire pour le milieu de tableau\n' +
-                '• Salaire pour le dernier du classement',
-              inline: false
-            },
-            {
-              name: '📝 Pour s\'inscrire',
-              value: '`!inscription <club_id>`',
-              inline: false
-            }
-          )
-          .setFooter({ text: 'Soccerverse Bot v3.0' });
-        
-        await message.reply({ embeds: [embed] });
-        return;
-      }
-
-      clubId = parseInt(registeredClubs[0]);
-      
-      if (registeredClubs.length > 1) {
-        const clubNames = [];
-        for (const id of registeredClubs.slice(0, 3)) {
-          clubNames.push(apiClient.getClubName(parseInt(id)));
-        }
-        
-        const infoEmbed = new EmbedBuilder()
-          .setColor('#2196F3')
-          .setTitle('📋 Plusieurs clubs inscrits')
-          .setDescription(`Calcul des salaires pour **${apiClient.getClubName(clubId)}** (premier club inscrit).`)
-          .addFields({
-            name: '🏟️ Clubs inscrits dans ce salon',
-            value: clubNames.join(', ') + (registeredClubs.length > 3 ? ` et ${registeredClubs.length - 3} autre(s)` : '')
-          })
-          .addFields({
-            name: '💡 Pour un autre club',
-            value: '`!salaire <club_id>`'
-          })
-          .setFooter({ text: 'Soccerverse Bot v3.0' });
-        
-        await message.reply({ embeds: [infoEmbed] });
-      }
-    } else {
-      clubId = parseInt(args[0]);
-
-      if (isNaN(clubId)) {
-        const embed = new EmbedBuilder()
-          .setColor('#FF6B6B')
-          .setTitle('❌ ID invalide')
-          .setDescription('Veuillez fournir un ID de club valide (nombre).')
-          .setFooter({ text: 'Exemple: !salaire 3227' });
-        
-        await message.reply({ embeds: [embed] });
-        return;
-      }
+      await message.reply({ embeds: [embed] });
+      return;
     }
 
+    const clubId = parseInt(args[0]);
+
+    if (isNaN(clubId)) {
+      const embed = new EmbedBuilder()
+        .setColor('#FF6B6B')
+        .setTitle('❌ ID invalide')
+        .setDescription('Veuillez fournir un ID de club valide (nombre).')
+        .setFooter({ text: 'Exemple: !salaire 3227' });
+      
+      await message.reply({ embeds: [embed] });
+      return;
+    }
+
+    // Message de chargement
     const loadingEmbed = new EmbedBuilder()
       .setColor('#4CAF50')
       .setTitle('⏳ Calcul en cours...')
@@ -175,161 +61,148 @@ module.exports = {
     const loadingMsg = await message.reply({ embeds: [loadingEmbed] });
 
     try {
-      console.log(`[SALAIRE] Récupération club ${clubId}...`);
-      const clubResponse = await apiClient.makeRpcRequest('get_club', { 
-        club_id: clubId 
-      });
-      
-      const clubData = clubResponse?.data || clubResponse;
+      // Récupérer les données du club
+      const clubData = await apiClient.makeRpcRequest('get_club', { name: clubId.toString() });
       
       if (!clubData || !clubData.club_id) {
         throw new Error('Club introuvable');
       }
-      
-      console.log(`[SALAIRE] ✅ Club trouvé: ${clubData.club_id}`);
 
+      // Récupérer les données de la ligue
       const clubLeagueData = await apiClient.makeRpcRequest('get_clubs_league', { 
-        club_id: clubId
+        club_ids: [clubId.toString()] 
       });
       
       let leagueId = null;
-      const clubLeague = clubLeagueData?.data || clubLeagueData;
-      
-      if (Array.isArray(clubLeague) && clubLeague.length > 0) {
-        leagueId = clubLeague[0].league_id;
-      } else if (clubLeague && clubLeague.league_id) {
-        leagueId = clubLeague.league_id;
+      if (clubLeagueData && Array.isArray(clubLeagueData)) {
+        const clubLeague = clubLeagueData.find(cl => cl.club_id === clubId.toString());
+        if (clubLeague && clubLeague.league_id) {
+          leagueId = clubLeague.league_id;
+        }
       }
 
       if (!leagueId) {
         throw new Error('Ligue introuvable pour ce club');
       }
 
-      const leagueResponse = await apiClient.makeRpcRequest('get_league', { 
-        league_id: parseInt(leagueId) 
+      // Récupérer les détails de la ligue
+      const leagueData = await apiClient.makeRpcRequest('get_league', { 
+        league_id: leagueId.toString() 
       });
-      
-      let leagueData = leagueResponse?.data || leagueResponse;
+
       const leagueInfo = Array.isArray(leagueData) ? leagueData[0] : leagueData;
 
-      if (!leagueInfo) {
-        throw new Error('Détails de ligue introuvables');
-      }
-
-      const compId = leagueInfo.comp_id;
-      const seasonId = leagueInfo.season_id;
-
-      // 🔥 CALCUL AUTOMATIQUE DES MATCHS
-      const matchData = await this.calculateLeagueMatches(compId, seasonId, apiClient);
-      
-      let homeMatches, totalMatches, numClubs;
-      
-      if (matchData) {
-        homeMatches = matchData.matchsDomicile;
-        totalMatches = matchData.matchsParEquipe;
-        numClubs = matchData.nbEquipes;
-        console.log(`[SALAIRE] ✅ Calculé: ${totalMatches} matchs (${homeMatches} domicile) pour ${numClubs} équipes`);
-      } else {
-        homeMatches = 14;
-        totalMatches = 28;
-        numClubs = 15;
-        console.log(`[SALAIRE] ⚠️ Fallback: valeurs par défaut`);
-      }
-
       // Récupérer le classement
-      let leagueTable = [];
-      let currentPosition = null;
+      const leagueTable = await apiClient.makeRpcRequest('get_league_table', { 
+        league_id: leagueId.toString() 
+      });
+
+      const numClubs = leagueTable ? leagueTable.length : 20;
       
-      try {
-        leagueTable = await apiClient.getLeagueTable(leagueId);
-        
-        if (!numClubs && leagueTable.length > 0) {
-          numClubs = leagueTable.length;
+      // Trouver la position du club
+      let clubPosition = null;
+      if (leagueTable) {
+        const clubEntry = leagueTable.find(entry => entry.club_id === clubId.toString());
+        if (clubEntry) {
+          clubPosition = clubEntry.position;
         }
-        
-        const clubRanking = leagueTable.find(club => club.club_id === clubId);
-        currentPosition = clubRanking ? clubRanking.new_position : null;
-        
-      } catch (error) {
-        console.log('[SALAIRE] Classement indisponible');
       }
 
-      const formatSalary = (salary) => {
-        if (salary >= 1000) {
-          return `${(salary / 1000).toFixed(1)}M$`;
+      // Extraire les données financières
+      const fanBase = clubData.fans_current || 0;
+      const stadiumCapacity = clubData.stadium_size_current || 0;
+      const ticketPrice = (leagueInfo.ticket_cost || 0) / 10000;
+      const tvMoney = (leagueInfo.tv_money || 0) / 1000;
+
+      // Calculer les matchs
+      const apiRounds = leagueInfo.round || 1;
+      const matchesPerTour = numClubs - 1;
+      let maxTours = Math.floor(apiRounds / matchesPerTour);
+      
+      if (maxTours === 0 && apiRounds > 0) {
+        maxTours = 2; // Saison complète par défaut
+      }
+      
+      const totalMatches = maxTours * matchesPerTour;
+      const homeMatches = totalMatches / 2;
+
+      // Fonction de calcul de salaire cible
+      const calculateTargetSalary = (position, numClubs) => {
+        const midTable = numClubs / 2;
+        let attendance = fanBase;
+        
+        if (position < midTable) {
+          const units = midTable - position;
+          const deltaFans = (fanBase / 30) * units;
+          attendance = fanBase + deltaFans;
+        } else if (position > midTable) {
+          const units = position - midTable;
+          const deltaFans = (fanBase / 30) * units;
+          attendance = fanBase - deltaFans;
         }
-        return `${salary.toFixed(1)}K$`;
-      };
-
-      const baseFans = clubData.base_fans || 1000;
-      const stadiumCapacity = clubData.stadium_capacity || 5000;
-      const ticketPrice = clubData.ticket_price || 50;
-      const tvRights = clubData.tv_rights || 50000;
-
-      const calculateTargetSalary = (position) => {
-        const positionFactor = 1 - ((position - 1) / numClubs) * 0.7;
         
-        const attendance = Math.min(
-          Math.floor(baseFans * positionFactor * 1.2),
-          stadiumCapacity
-        );
+        attendance = Math.round(Math.min(attendance, stadiumCapacity));
         
-        const ticketRevenue = attendance * ticketPrice;
-        const tvRevenuePerMatch = tvRights / totalMatches;
-        const merchandising = attendance * 15;
-        const sponsoring = baseFans * 5 * positionFactor;
+        const gateReceipts = (attendance * ticketPrice) * 0.8;
+        const sponsorship = (attendance * ticketPrice) * 0.3;
+        const merchandise = (attendance * ticketPrice) * 0.1;
+        const tvMoneyPerMatch = tvMoney;
         
-        const totalRevenuePerMatch = ticketRevenue + tvRevenuePerMatch + merchandising + sponsoring;
+        const totalHomeIncome = (gateReceipts + sponsorship + merchandise) * homeMatches;
+        const totalTvMoney = tvMoneyPerMatch * totalMatches;
+        const totalSeasonIncome = totalHomeIncome + totalTvMoney;
         
-        const salaryBudgetRatio = 0.5 + (positionFactor * 0.1);
-        const targetSalary = (totalRevenuePerMatch * salaryBudgetRatio) / 1000;
+        const stadiumMaintenancePerMatch = 0.20 * (attendance * ticketPrice);
+        const stadiumMaintenance = stadiumMaintenancePerMatch * homeMatches;
         
-        const seasonIncome = (ticketRevenue * homeMatches) + tvRights + (merchandising * homeMatches);
+        const leagueWageEstimate = 8000000;
+        const prizePot = leagueWageEstimate * 0.12;
+        const estimatedPrizeMoney = (prizePot / numClubs) * (1 + (0.05 * (numClubs - position)));
         
-        let prize = 0;
-        if (position === 1) prize = 500000;
-        else if (position <= 3) prize = 300000;
-        else if (position <= numClubs / 2) prize = 100000;
+        const totalBudgetForSalaries = (totalSeasonIncome + estimatedPrizeMoney) - stadiumMaintenance;
+        const targetClubSalaryPerMatch = totalBudgetForSalaries / totalMatches;
         
         return {
-          salary: targetSalary,
-          attendance,
-          income: seasonIncome / 1000,
-          prize: prize / 1000
+          salary: targetClubSalaryPerMatch,
+          attendance: attendance,
+          income: totalSeasonIncome,
+          prize: estimatedPrizeMoney
         };
       };
 
-      const firstPlace = calculateTargetSalary(1);
-      const midTable = calculateTargetSalary(Math.ceil(numClubs / 2));
-      const lastPlace = calculateTargetSalary(numClubs);
-      const currentPos = currentPosition ? calculateTargetSalary(currentPosition) : null;
+      // Calculer pour différentes positions
+      const firstPlace = calculateTargetSalary(1, numClubs);
+      const midTable = calculateTargetSalary(Math.ceil(numClubs / 2), numClubs);
+      const lastPlace = calculateTargetSalary(numClubs, numClubs);
+      const currentPos = clubPosition ? calculateTargetSalary(clubPosition, numClubs) : null;
 
+      // Créer l'embed de réponse
+      const clubName = apiClient.getClubName(clubId);
+      
       const embed = new EmbedBuilder()
-        .setColor('#FF6600')
-        .setTitle(`💰 Salaires Cibles - ${clubData.name || `Club ${clubId}`}`)
-        .setDescription(
-          `Calculés pour une ligue de **${numClubs} clubs** avec **${totalMatches} matchs** au total ` +
-          `(${homeMatches} à domicile)${matchData ? ' ✅' : ' ⚠️'}`
+        .setColor('#4CAF50')
+        .setTitle(`💰 Salaires Cibles - ${clubName}`)
+        .setDescription(`Calculés pour une ligue de **${numClubs} clubs** avec **${totalMatches} matchs** au total`)
+        .addFields(
+          {
+            name: '📊 Données du Club',
+            value: 
+              `👥 Base de fans: **${fanBase.toLocaleString('fr-FR')}**\n` +
+              `🏟️ Capacité stade: **${stadiumCapacity.toLocaleString('fr-FR')}**\n` +
+              `🎫 Prix billet: **${ticketPrice.toFixed(2)} SVC**\n` +
+              `📺 Droits TV: **${(tvMoney / 1000).toFixed(1)} k SVC**/match`,
+            inline: false
+          }
         );
 
-      embed.addFields({
-        name: '📊 Données du Club',
-        value: 
-          `👥 Base de fans: ${baseFans.toLocaleString('fr-FR')}\n` +
-          `🏟️ Capacité stade: ${stadiumCapacity.toLocaleString('fr-FR')}\n` +
-          `🎫 Prix billet: ${ticketPrice} SVC\n` +
-          `📺 Droits TV: ${formatSalary(tvRights/1000)}/saison`,
-        inline: false
-      });
-
-      if (currentPos && currentPosition) {
+      if (currentPos && clubPosition) {
         embed.addFields({
-          name: `🎯 Votre Position Actuelle (${currentPosition}${currentPosition === 1 ? 'er' : 'e'})`,
+          name: `🎯 Votre Position Actuelle (${clubPosition}${clubPosition === 1 ? 'er' : 'e'})`,
           value: 
-            `💵 **Salaire cible: ${formatSalary(currentPos.salary)}/match**\n` +
+            `💵 **Salaire cible: ${apiClient.formatMoney(currentPos.salary)}/match**\n` +
             `👥 Affluence estimée: ${currentPos.attendance.toLocaleString('fr-FR')} fans\n` +
-            `💰 Revenus saison: ${formatSalary(currentPos.income)}\n` +
-            `🏆 Prime estimée: ${formatSalary(currentPos.prize)}`,
+            `💰 Revenus saison: ${apiClient.formatMoney(currentPos.income)}\n` +
+            `🏆 Prime estimée: ${apiClient.formatMoney(currentPos.prize)}`,
           inline: false
         });
       }
@@ -338,21 +211,21 @@ module.exports = {
         {
           name: '🥇 1er du Classement',
           value: 
-            `💵 Salaire cible: **${formatSalary(firstPlace.salary)}/match**\n` +
+            `💵 Salaire cible: **${apiClient.formatMoney(firstPlace.salary)}/match**\n` +
             `👥 Affluence: ${firstPlace.attendance.toLocaleString('fr-FR')} fans`,
           inline: true
         },
         {
           name: `📊 Milieu de Tableau (${Math.ceil(numClubs / 2)}e)`,
           value: 
-            `💵 Salaire cible: **${formatSalary(midTable.salary)}/match**\n` +
+            `💵 Salaire cible: **${apiClient.formatMoney(midTable.salary)}/match**\n` +
             `👥 Affluence: ${midTable.attendance.toLocaleString('fr-FR')} fans`,
           inline: true
         },
         {
           name: `📉 Dernier (${numClubs}e)`,
           value: 
-            `💵 Salaire cible: **${formatSalary(lastPlace.salary)}/match**\n` +
+            `💵 Salaire cible: **${apiClient.formatMoney(lastPlace.salary)}/match**\n` +
             `👥 Affluence: ${lastPlace.attendance.toLocaleString('fr-FR')} fans`,
           inline: true
         }
@@ -387,4 +260,3 @@ module.exports = {
       await loadingMsg.edit({ embeds: [errorEmbed] });
     }
   }
-};
