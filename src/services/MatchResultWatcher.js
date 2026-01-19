@@ -7,610 +7,494 @@ class MatchResultWatcher {
     this.dataManager = dataManager;
     this.apiClient = apiClient;
     
-    // 🔥 CORRECTION: Charger depuis le bon emplacement
+    // Cache des matchs à venir par club
+    this.upcomingMatchesCache = new Map(); // clubId -> [matches]
+    this.lastCacheUpdate = null;
+    
+    // Matchs déjà traités (pour éviter doublons)
     this.processedMatches = this.loadProcessedMatches();
     
-    this.checkInterval = 30 * 1000;
-    this.firstAttemptDelay = 15 * 1000;
-    this.retryDelay = 30 * 1000;
-    this.maxRetries = 3;
-    this.matchAttempts = new Map();
-    this.notificationDelay = 10 * 1000;
+    // Timers programmés pour chaque match
+    this.scheduledChecks = new Map(); // matchKey -> timeoutId
     
-    // 🔥 NOUVEAU: Sauvegarder toutes les 5 minutes
-    setInterval(() => {
-      this.saveProcessedMatches();
-    }, 5 * 60 * 1000);
+    // Configuration retry
+    this.maxRetries = 3;
+    this.retryDelays = [15000, 30000, 60000]; // 15s, 30s, 60s
+    this.matchCheckDelay = 15 * 1000; // 15 secondes après l'heure du match
+    
+    // Statistiques
+    this.stats = {
+      totalMatches: 0,
+      successfulChecks: 0,
+      failedChecks: 0,
+      cacheUpdates: 0
+    };
     
     this.startWatching();
   }
 
-  // 🔥 CORRECTION MAJEURE: Meilleure persistance
-  loadProcessedMatches() {
-    try {
-      const settings = this.dataManager.getChannelSettings('_global_results');
-
-      if (settings && settings.processedMatches) {
-        const map = new Map();
-        const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000); // 🔥 60 jours pour éviter les doublons après longue période
-
-        // Charger tous les matchs récents
-        for (const [key, data] of Object.entries(settings.processedMatches)) {
-          if (data.timestamp > sixtyDaysAgo) {
-            map.set(key, data);
-          }
-        }
-
-        logger.info(`📦 ${map.size} match(s) déjà traité(s) chargé(s) depuis le cache (60 derniers jours)`);
-        return map;
-      }
-    } catch (error) {
-      logger.warn('⚠️ Impossible de charger le cache des matchs:', error.message);
-    }
-
-    return new Map();
-  }
-
-  // 🔥 CORRECTION: Sauvegarder de manière robuste
-  async saveProcessedMatches() {
-    try {
-      // Convertir Map en objet pour JSON
-      const processedMatchesObj = {};
-      for (const [key, data] of this.processedMatches.entries()) {
-        processedMatchesObj[key] = data;
-      }
-      
-      // Sauvegarder dans un canal spécial pour les résultats
-      this.dataManager.setChannelSettings('_global_results', {
-        processedMatches: processedMatchesObj,
-        lastSaved: Date.now()
-      });
-      
-      await this.dataManager.save();
-      
-      logger.debug(`💾 Cache matchs sauvegardé: ${this.processedMatches.size} entrée(s)`);
-    } catch (error) {
-      logger.error('❌ Erreur lors de la sauvegarde du cache:', error);
-    }
-  }
-
+  // =================== DÉMARRAGE ===================
+  
   startWatching() {
-    setTimeout(() => {
-      this.checkRecentMatches();
-    }, 30000);
+    // 1. Charger le cache immédiatement au démarrage
+    setTimeout(async () => {
+      logger.info('⚽ Chargement initial du cache des matchs...');
+      await this.updateMatchCache();
+      this.scheduleAllMatches();
+    }, 10000); // 10 secondes après le démarrage
     
+    // 2. Programmer la mise à jour quotidienne à 3h du matin
+    this.scheduleDailyUpdate();
+    
+    // 3. Sauvegarder les matchs traités toutes les 10 minutes
     setInterval(() => {
-      this.checkRecentMatches();
-    }, this.checkInterval);
+      this.saveProcessedMatches();
+    }, 10 * 60 * 1000);
     
-    logger.info('⚽ Surveillance résultats démarrée (30s, premier essai 15s après match, 3 tentatives espacées de 30s)');
+    logger.info('⚽ Surveillance résultats optimisée démarrée');
+    logger.info('   📅 Cache : Mise à jour quotidienne à 3h00');
+    logger.info('   ⏰ Vérifications : Heure du match + 15s (3 tentatives si échec)');
   }
 
-  async checkRecentMatches() {
-    try {
-      const registeredClubs = this.dataManager.getAllRegisteredClubs();
+  // =================== MISE À JOUR DU CACHE (1x/JOUR à 3h) ===================
+  
+  scheduleDailyUpdate() {
+    const now = new Date();
+    const next3AM = new Date();
+    next3AM.setHours(3, 0, 0, 0);
+    
+    // Si on est déjà passé 3h aujourd'hui, programmer pour demain
+    if (now > next3AM) {
+      next3AM.setDate(next3AM.getDate() + 1);
+    }
+    
+    const timeUntil3AM = next3AM - now;
+    
+    logger.info(`📅 Prochaine mise à jour du cache programmée à ${next3AM.toLocaleString('fr-FR')}`);
+    
+    setTimeout(async () => {
+      logger.info('🌙 Mise à jour nocturne du cache des matchs (3h00)...');
+      await this.updateMatchCache();
+      this.scheduleAllMatches();
       
-      if (registeredClubs.length === 0) {
-        return;
+      // Reprogrammer pour le lendemain
+      this.scheduleDailyUpdate();
+    }, timeUntil3AM);
+  }
+
+  async updateMatchCache() {
+    try {
+      logger.info('🔄 Mise à jour du cache des matchs...');
+      
+      const registeredClubs = this.dataManager.getAllRegisteredClubs();
+      const now = Date.now() / 1000;
+      const next7Days = now + (7 * 24 * 60 * 60); // 7 jours
+      
+      let totalMatches = 0;
+      
+      for (const clubId of registeredClubs) {
+        try {
+          // Récupérer les 5 prochains matchs du club
+          const matches = await this.apiClient.getClubSchedule(parseInt(clubId), 10);
+          
+          // Filtrer pour garder seulement les matchs à venir (7 prochains jours max)
+          const upcomingMatches = matches.filter(match => 
+            match.date > now && 
+            match.date < next7Days && 
+            match.played === 0
+          );
+          
+          if (upcomingMatches.length > 0) {
+            this.upcomingMatchesCache.set(clubId, upcomingMatches);
+            totalMatches += upcomingMatches.length;
+            
+            logger.debug(`📌 Club ${clubId}: ${upcomingMatches.length} match(s) à venir`);
+          } else {
+            // Retirer du cache si plus de matchs à venir
+            this.upcomingMatchesCache.delete(clubId);
+          }
+          
+          // Délai entre chaque club pour éviter de surcharger l'API
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+        } catch (error) {
+          logger.error(`Erreur récupération calendrier club ${clubId}:`, error.message);
+        }
       }
       
-      logger.debug(`⚽ Vérification résultats pour ${registeredClubs.length} club(s)`);
+      this.lastCacheUpdate = Date.now();
+      this.stats.cacheUpdates++;
       
-      const clubsToCheck = [];
+      logger.info(`✅ Cache mis à jour: ${totalMatches} match(s) programmé(s) pour ${registeredClubs.length} club(s)`);
+      
+      // Sauvegarder le cache
+      await this.saveMatchCache();
+      
+    } catch (error) {
+      logger.error('❌ Erreur mise à jour cache matchs:', error);
+    }
+  }
 
-      for (const clubId of registeredClubs) {
-        const clubIdNum = parseInt(clubId);
-
-        // Ignorer les IDs invalides
-        if (isNaN(clubIdNum) || clubIdNum <= 0) {
-          logger.warn(`⚠️ ID de club invalide ignoré dans MatchResultWatcher: "${clubId}"`);
+  // =================== SCHEDULING DES VÉRIFICATIONS ===================
+  
+  scheduleAllMatches() {
+    // Annuler tous les timers existants
+    for (const timeoutId of this.scheduledChecks.values()) {
+      clearTimeout(timeoutId);
+    }
+    this.scheduledChecks.clear();
+    
+    const now = Date.now() / 1000;
+    let scheduledCount = 0;
+    
+    for (const [clubId, matches] of this.upcomingMatchesCache.entries()) {
+      for (const match of matches) {
+        const matchKey = this.generateMatchKey(clubId, match);
+        
+        // Skip si déjà traité
+        if (this.processedMatches.has(matchKey)) {
+          logger.debug(`Match déjà traité (skip): ${matchKey}`);
           continue;
         }
-
-        clubsToCheck.push({
-          clubId: clubIdNum,
-          delay: clubsToCheck.length * this.notificationDelay
-        });
+        
+        // Calculer quand vérifier (heure du match + 15 secondes)
+        const checkTime = match.date + 15; // 15 secondes après l'heure du match
+        const delayMs = (checkTime - now) * 1000;
+        
+        // Ne programmer que si c'est dans le futur
+        if (delayMs > 0) {
+          const timeoutId = setTimeout(async () => {
+            await this.checkMatchResult(clubId, match, 0);
+          }, delayMs);
+          
+          this.scheduledChecks.set(matchKey, timeoutId);
+          scheduledCount++;
+          
+          const matchDate = new Date(match.date * 1000);
+          const checkDate = new Date(checkTime * 1000);
+          logger.debug(`⏰ Match programmé: Club ${clubId} - ${matchDate.toLocaleString('fr-FR')} → Vérif: ${checkDate.toLocaleString('fr-FR')}`);
+        } else {
+          // Match dans le passé mais pas encore vérifié
+          logger.warn(`⚠️ Match passé non vérifié: Club ${clubId} - ${new Date(match.date * 1000).toLocaleString('fr-FR')}`);
+          
+          // Vérifier immédiatement
+          setTimeout(async () => {
+            await this.checkMatchResult(clubId, match, 0);
+          }, 5000); // Dans 5 secondes
+        }
       }
-      
-      for (const {clubId, delay} of clubsToCheck) {
-        setTimeout(async () => {
-          try {
-            await this.checkClubRecentResult(clubId);
-          } catch (error) {
-            logger.error(`Erreur vérification club ${clubId}:`, error);
-          }
-        }, delay);
-      }
-      
-      this.cleanupProcessedMatches();
-      
-    } catch (error) {
-      logger.error('Erreur surveillance résultats globale:', error);
     }
+    
+    logger.info(`⏰ ${scheduledCount} vérification(s) de résultat programmée(s)`);
   }
 
-  async checkClubRecentResult(clubId) {
+  // =================== VÉRIFICATION AVEC RETRY ===================
+  
+  async checkMatchResult(clubId, match, retryAttempt = 0) {
+    const matchKey = this.generateMatchKey(clubId, match);
+    
+    // Vérifier si déjà traité (au cas où)
+    if (this.processedMatches.has(matchKey)) {
+      logger.debug(`Match déjà traité: ${matchKey}`);
+      return;
+    }
+    
     try {
-      const lastMatch = await this.apiClient.getClubLastMatch(clubId);
-
+      const attemptLabel = retryAttempt === 0 ? 'initiale' : `retry ${retryAttempt}`;
+      logger.info(`⚽ Vérification résultat Club ${clubId} (tentative ${attemptLabel})...`);
+      
+      // Récupérer le dernier match du club
+      const lastMatch = await this.apiClient.getClubLastMatch(parseInt(clubId));
+      
       if (!lastMatch) {
-        return;
+        throw new Error('Aucun match trouvé');
       }
-
-      // 🔥 CORRECTION CRITIQUE: Générer une clé robuste
-      const matchKey = this.generateMatchKey(clubId, lastMatch);
-
-      // 🔥 VÉRIFICATION IMMÉDIATE: Si déjà traité, STOP !
-      if (this.processedMatches.has(matchKey)) {
-        logger.debug(`✅ Match ${matchKey} déjà notifié, skip`);
-        return;
+      
+      // Vérifier que c'est bien le bon match
+      const isCorrectMatch = this.isMatchingFixture(lastMatch, match);
+      
+      if (!isCorrectMatch) {
+        logger.warn(`⚠️ Match trouvé ne correspond pas au match attendu pour club ${clubId}`);
+        logger.debug(`   Attendu: ${match.home_club} vs ${match.away_club} à ${new Date(match.date * 1000).toLocaleString('fr-FR')}`);
+        logger.debug(`   Trouvé: ${lastMatch.home_club} vs ${lastMatch.away_club} à ${new Date(lastMatch.date * 1000).toLocaleString('fr-FR')}`);
+        throw new Error('Match différent');
       }
-
-      const matchTime = new Date(lastMatch.date * 1000);
-      const now = new Date();
-      const timeSinceMatch = now.getTime() - matchTime.getTime();
-      const minDelay = this.firstAttemptDelay;
-      const maxDelay = 2 * 60 * 1000;
-
-      // 🔥 NOUVELLE VÉRIFICATION: Ne pas notifier les matchs de plus de 7 jours
-      // Cela évite de re-notifier de vieux matchs si le cache a été perdu/nettoyé
-      const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
-      if (timeSinceMatch > sevenDaysInMs) {
-        logger.debug(`⏭️ Match ${matchKey} trop ancien (${Math.round(timeSinceMatch / (24 * 60 * 60 * 1000))} jours), skip notification mais ajout au cache`);
-        // Ajouter au cache pour éviter de revérifier ce match
+      
+      // Vérifier que le match est bien terminé
+      if (lastMatch.played !== 1) {
+        logger.warn(`⚠️ Match pas encore terminé (played=${lastMatch.played})`);
+        throw new Error('Match non terminé');
+      }
+      
+      // ✅ Match terminé ! Envoyer la notification
+      await this.sendMatchResult(clubId, lastMatch);
+      
+      // Marquer comme traité
+      this.processedMatches.set(matchKey, {
+        timestamp: Date.now(),
+        clubId: clubId,
+        matchId: lastMatch.fixture_id || lastMatch.match_id,
+        homeGoals: lastMatch.home_goals,
+        awayGoals: lastMatch.away_goals,
+        date: lastMatch.date
+      });
+      
+      this.stats.successfulChecks++;
+      this.stats.totalMatches++;
+      await this.saveProcessedMatches();
+      
+      logger.info(`✅ Résultat traité avec succès: Club ${clubId} - ${lastMatch.home_goals}-${lastMatch.away_goals}`);
+      
+      // Retirer du cache et du scheduling
+      this.scheduledChecks.delete(matchKey);
+      
+    } catch (error) {
+      logger.error(`❌ Erreur vérification match club ${clubId} (tentative ${retryAttempt + 1}/${this.maxRetries + 1}):`, error.message);
+      
+      // Retry si on n'a pas atteint le max
+      if (retryAttempt < this.maxRetries) {
+        const retryDelay = this.retryDelays[retryAttempt];
+        
+        logger.info(`🔄 Retry programmé dans ${retryDelay/1000}s pour club ${clubId} (tentative ${retryAttempt + 2}/${this.maxRetries + 1})`);
+        
+        setTimeout(async () => {
+          await this.checkMatchResult(clubId, match, retryAttempt + 1);
+        }, retryDelay);
+        
+      } else {
+        logger.error(`❌ Échec définitif après ${this.maxRetries + 1} tentatives pour club ${clubId}`);
+        this.stats.failedChecks++;
+        
+        // Marquer quand même comme traité pour éviter de réessayer indéfiniment
         this.processedMatches.set(matchKey, {
           timestamp: Date.now(),
           clubId: clubId,
-          matchData: {
-            date: lastMatch.date,
-            home_club: lastMatch.home_club,
-            away_club: lastMatch.away_club,
-            home_goals: lastMatch.home_goals,
-            away_goals: lastMatch.away_goals
-          }
+          failed: true,
+          error: error.message,
+          attempts: retryAttempt + 1
         });
         await this.saveProcessedMatches();
-        return;
-      }
-      
-      if (timeSinceMatch < minDelay) {
-        return;
-      }
-      
-      const attemptData = this.matchAttempts.get(matchKey) || { attempts: 0, lastAttempt: 0 };
-      
-      if (attemptData.attempts >= this.maxRetries) {
-        if (lastMatch.played === 1) {
-          await this.processMatchResult(clubId, lastMatch, matchKey);
-        } else {
-          if (timeSinceMatch > maxDelay && timeSinceMatch < 6 * 60 * 60 * 1000) {
-            const lastCheckTime = attemptData.lastAttempt;
-            const timeSinceLastCheck = Date.now() - lastCheckTime;
-            
-            if (timeSinceLastCheck >= 3 * 60 * 1000) {
-              if (lastMatch.played === 1) {
-                await this.processMatchResult(clubId, lastMatch, matchKey);
-              } else {
-                this.matchAttempts.set(matchKey, {
-                  ...attemptData,
-                  lastAttempt: Date.now()
-                });
-              }
-            }
-          }
-        }
-        return;
-      }
-      
-      const timeSinceLastAttempt = Date.now() - attemptData.lastAttempt;
-      if (attemptData.attempts > 0 && timeSinceLastAttempt < this.retryDelay) {
-        return;
-      }
-      
-      this.matchAttempts.set(matchKey, {
-        attempts: attemptData.attempts + 1,
-        lastAttempt: Date.now()
-      });
-      
-      logger.debug(`Tentative ${attemptData.attempts + 1}/${this.maxRetries} pour match ${matchKey} (${Math.round(timeSinceMatch/1000)}s après match)`);
-      
-      if (lastMatch.played === 1) {
-        logger.info(`✅ Match terminé détecté à la tentative ${attemptData.attempts + 1}: ${matchKey}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
-        await this.processMatchResult(clubId, lastMatch, matchKey);
-      } else {
-        logger.debug(`❌ Match ${matchKey} pas encore terminé (played=${lastMatch.played}, tentative ${attemptData.attempts + 1}/${this.maxRetries})`);
-      }
-      
-    } catch (error) {
-      if (error.message.includes('429') || error.message.includes('timeout')) {
-        logger.warn(`Rate limit/timeout club ${clubId}, skip`);
-      } else {
-        logger.error(`Erreur vérification club ${clubId}:`, error);
+        
+        // Retirer du scheduling
+        this.scheduledChecks.delete(matchKey);
       }
     }
   }
 
-  // 🔥 NOUVELLE MÉTHODE: Générer une clé unique et robuste
+  // =================== UTILITAIRES ===================
+  
   generateMatchKey(clubId, match) {
-    // Essayer plusieurs sources d'ID dans l'ordre de préférence
+    // Utiliser l'ID du match si disponible
     const matchId = match.fixture_id || match.match_id || match.id;
     
     if (matchId) {
       return `${clubId}_${matchId}`;
     }
     
-    // Fallback: utiliser la date + équipes
-    const dateKey = Math.floor(match.date / 60); // Arrondir à la minute
+    // Fallback: date + équipes (arrondir à la minute pour éviter les différences de secondes)
+    const dateKey = Math.floor(match.date / 60);
     const homeClub = match.home_club || 0;
     const awayClub = match.away_club || 0;
-    
     return `${clubId}_${dateKey}_${homeClub}_${awayClub}`;
   }
 
-  async processMatchResult(clubId, lastMatch, matchKey) {
-    // 🔥 DOUBLE VÉRIFICATION
-    if (this.processedMatches.has(matchKey)) {
-      logger.warn(`⚠️ Match ${matchKey} déjà dans le cache, skip (double vérification)`);
-      return;
+  isMatchingFixture(lastMatch, expectedMatch) {
+    // Vérifier par ID si disponible
+    const lastMatchId = lastMatch.fixture_id || lastMatch.match_id;
+    const expectedMatchId = expectedMatch.fixture_id || expectedMatch.match_id;
+    
+    if (lastMatchId && expectedMatchId) {
+      return lastMatchId === expectedMatchId;
     }
     
-    logger.info(`🏆 AJOUT match au cache: ${matchKey} (Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals})`);
+    // Fallback: vérifier date + équipes
+    const dateDiff = Math.abs(lastMatch.date - expectedMatch.date);
+    const sameTeams = (
+      lastMatch.home_club === expectedMatch.home_club &&
+      lastMatch.away_club === expectedMatch.away_club
+    );
     
-    this.processedMatches.set(matchKey, {
-      timestamp: Date.now(),
-      clubId: clubId,
-      matchData: {
-        date: lastMatch.date,
-        home_club: lastMatch.home_club,
-        away_club: lastMatch.away_club,
-        home_goals: lastMatch.home_goals,
-        away_goals: lastMatch.away_goals
-      }
-    });
-    
-    this.matchAttempts.delete(matchKey);
-    
-    // 🔥 NOUVEAU: Sauvegarder immédiatement après traitement
-    await this.saveProcessedMatches();
-    
-    logger.info(`🏆 Résultat notifié: Club ${clubId}, Score ${lastMatch.home_goals}-${lastMatch.away_goals}`);
-    
-    await this.sendMatchResultNotification(clubId, lastMatch);
+    // Date doit être dans la même heure et mêmes équipes
+    return dateDiff < 3600 && sameTeams;
   }
 
-  async sendMatchResultNotification(clubId, match) {
+  async sendMatchResult(clubId, match) {
     try {
-      const channelsForClub = this.dataManager.getChannelsForClub(clubId);
+      const channels = this.dataManager.getChannelsForClub(clubId);
       
-      if (channelsForClub.length === 0) {
+      if (channels.length === 0) {
+        logger.debug(`Aucun canal pour le club ${clubId}, skip notification`);
         return;
       }
       
-      // Récupérer les stats détaillées du match
-      const matchDetails = await this.getMatchDetails(match.fixture_id || match.match_id || match.id);
-      const embed = await this.createMatchResultEmbed(clubId, match, matchDetails);
+      const isHome = match.home_club == clubId;
+      const opponentId = isHome ? match.away_club : match.home_club;
+      const opponentName = this.apiClient.getClubName(opponentId);
+      const clubName = this.apiClient.getClubName(clubId);
       
-      for (const channelId of channelsForClub) {
-        try {
-          const channel = this.client.channels.cache.get(channelId);
-          if (!channel) {
-            logger.warn(`Canal ${channelId} introuvable`);
-            continue;
+      const result = `${match.home_goals}-${match.away_goals}`;
+      let resultEmoji = '⚪';
+      let resultText = 'Match nul';
+      let embedColor = '#FFA500';
+      
+      if ((isHome && match.home_goals > match.away_goals) || 
+          (!isHome && match.away_goals > match.home_goals)) {
+        resultEmoji = '✅';
+        resultText = 'Victoire !';
+        embedColor = '#4CAF50';
+      } else if ((isHome && match.home_goals < match.away_goals) || 
+                 (!isHome && match.away_goals < match.home_goals)) {
+        resultEmoji = '❌';
+        resultText = 'Défaite';
+        embedColor = '#FF6B6B';
+      }
+      
+      const embed = new EmbedBuilder()
+        .setColor(embedColor)
+        .setTitle(`${resultEmoji} ${resultText}`)
+        .setDescription(
+          `**${match.home_club_name}** ${match.home_goals} - ${match.away_goals} **${match.away_club_name}**`
+        )
+        .addFields(
+          {
+            name: '⚽ Compétition',
+            value: match.competition_type || 'Match de championnat',
+            inline: true
+          },
+          {
+            name: '🏟️ Stade',
+            value: match.stadium_name || 'Inconnu',
+            inline: true
+          },
+          {
+            name: '📅 Date',
+            value: new Date(match.date * 1000).toLocaleString('fr-FR'),
+            inline: true
           }
-          
-          const mentionIds = this.getMentionIdsForClub(channelId, clubId);
-          const mentions = mentionIds.length > 0 ? mentionIds.map(id => `<@${id}>`).join(' ') : undefined;
-          
-          await channel.send({ 
-            content: mentions,
-            embeds: [embed] 
-          });
-          
-        } catch (error) {
-          logger.error(`Erreur envoi canal ${channelId}:`, error);
-        }
-      }
-      
-      logger.info(`🏆 Notification envoyée: Club ${clubId}, ${channelsForClub.length} canal(aux)`);
-      
-    } catch (error) {
-      logger.error('Erreur envoi notification résultat:', error);
-    }
-  }
-
-  async getMatchDetails(fixtureId) {
-    if (!fixtureId) {
-      logger.warn('Aucun fixture_id fourni, skip détails');
-      return null;
-    }
-    
-    try {
-      const result = await this.apiClient.makeRpcRequest('get_fixture', {
-        fixture_id: parseInt(fixtureId)
-      });
-      
-      let matchDetails = null;
-      
-      if (Array.isArray(result)) {
-        matchDetails = result[0];
-      } else if (result && result.data && Array.isArray(result.data)) {
-        matchDetails = result.data[0];
-      } else if (result && result.data) {
-        matchDetails = result.data;
-      } else if (result) {
-        matchDetails = result;
-      }
-      
-      if (!matchDetails) {
-        logger.warn(`Aucun détail trouvé pour le match ${fixtureId}`);
-        return null;
-      }
-      
-      logger.debug(`✅ Stats match ${fixtureId}: possession=${matchDetails.home_possession}/${matchDetails.away_possession}, tirs=${matchDetails.home_shots}/${matchDetails.away_shots}`);
-      
-      return matchDetails;
-    } catch (error) {
-      logger.warn(`Impossible de récupérer les détails du match ${fixtureId}:`, error.message);
-      return null;
-    }
-  }
-
-  getMentionIdsForClub(channelId, clubId) {
-    const clubIdStr = clubId.toString();
-    const channelClubs = this.dataManager.data.registrations.get(channelId);
-    
-    if (!channelClubs) return [];
-    
-    const clubInfo = channelClubs.get(clubIdStr);
-    
-    if (!clubInfo || !clubInfo.registeredBy) return [];
-    
-    return [clubInfo.registeredBy];
-  }
-
-  async createMatchResultEmbed(clubId, match, matchDetails) {
-    const clubName = this.apiClient.getClubName(clubId);
-    const matchTime = new Date(match.date * 1000);
-    
-    const isHome = match.home_club == clubId;
-    const opponentId = isHome ? match.away_club : match.home_club;
-    const opponentName = this.apiClient.getClubName(opponentId);
-    const venue = isHome ? '🏟️ Domicile' : '✈️ Extérieur';
-    
-    const clubGoals = isHome ? match.home_goals : match.away_goals;
-    const opponentGoals = isHome ? match.away_goals : match.home_goals;
-    
-    let matchResult = '';
-    let embedColor = '';
-    let resultEmoji = '';
-    
-    if (clubGoals > opponentGoals) {
-      matchResult = '🎉 **VICTOIRE !**';
-      embedColor = '#4CAF50';
-      resultEmoji = '🟢';
-    } else if (clubGoals < opponentGoals) {
-      matchResult = '😔 **Défaite**';
-      embedColor = '#F44336';
-      resultEmoji = '🔴';
-    } else {
-      matchResult = '🤝 **Match Nul**';
-      embedColor = '#FF9800';
-      resultEmoji = '🟡';
-    }
-    
-    const finalScore = `${match.home_goals} - ${match.away_goals}`;
-    const homeTeam = this.apiClient.getClubName(match.home_club);
-    const awayTeam = this.apiClient.getClubName(match.away_club);
-    
-    const embed = new EmbedBuilder()
-      .setColor(embedColor)
-      .setTitle(`⚽ Résultat de Match - ${clubName}`)
-      .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
-      .setDescription(`${matchResult}\n${resultEmoji} **${finalScore}**`);
-
-    // Infos du match
-    let matchInfo = `**${homeTeam}** ${match.home_goals} - ${match.away_goals} **${awayTeam}**\n`;
-    matchInfo += `📍 ${venue}\n`;
-    matchInfo += `🏟️ ${match.stadium_name || 'Stade inconnu'}\n`;
-    matchInfo += `📅 ${matchTime.toLocaleDateString('fr-FR')} à ${matchTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}\n`;
-    matchInfo += `🏆 ${match.competition_type || '⚽ Match'}`;
-    
-    embed.addFields({
-      name: '🏟️ Match',
-      value: matchInfo,
-      inline: false
-    });
-
-    const hasStats = matchDetails && (
-      matchDetails.home_possession !== undefined ||
-      matchDetails.home_shots !== undefined ||
-      matchDetails.home_corners !== undefined
-    );
-
-    if (hasStats) {
-      const clubStats = isHome ? {
-        possession: matchDetails.home_possession,
-        shots: matchDetails.home_shots,
-        shotsOnTarget: matchDetails.home_shots_on_target,
-        corners: matchDetails.home_corners
-      } : {
-        possession: matchDetails.away_possession,
-        shots: matchDetails.away_shots,
-        shotsOnTarget: matchDetails.away_shots_on_target,
-        corners: matchDetails.away_corners
-      };
-      
-      const opponentStats = isHome ? {
-        possession: matchDetails.away_possession,
-        shots: matchDetails.away_shots,
-        shotsOnTarget: matchDetails.away_shots_on_target,
-        corners: matchDetails.away_corners
-      } : {
-        possession: matchDetails.home_possession,
-        shots: matchDetails.home_shots,
-        shotsOnTarget: matchDetails.home_shots_on_target,
-        corners: matchDetails.home_corners
-      };
-
-      let clubStatsText = `**${clubName}**\n`;
-      clubStatsText += `⚽ **Buts:** ${clubGoals}\n`;
-      clubStatsText += `📊 **Possession:** ${clubStats.possession || 'N/A'}%\n`;
-      clubStatsText += `🎯 **Tirs:** ${clubStats.shots || 0} (${clubStats.shotsOnTarget || 0} cadrés)\n`;
-      clubStatsText += `🚩 **Corners:** ${clubStats.corners || 0}`;
-      
-      embed.addFields({
-        name: '📊 Vos Statistiques',
-        value: clubStatsText,
-        inline: true
-      });
-
-      let opponentStatsText = `**${opponentName}**\n`;
-      opponentStatsText += `⚽ **Buts:** ${opponentGoals}\n`;
-      opponentStatsText += `📊 **Possession:** ${opponentStats.possession || 'N/A'}%\n`;
-      opponentStatsText += `🎯 **Tirs:** ${opponentStats.shots || 0} (${opponentStats.shotsOnTarget || 0} cadrés)\n`;
-      opponentStatsText += `🚩 **Corners:** ${opponentStats.corners || 0}`;
-      
-      embed.addFields({
-        name: '🆚 Adversaire',
-        value: opponentStatsText,
-        inline: true
-      });
-
-      if (matchDetails.man_of_match) {
-        const motmName = this.apiClient.getPlayerName(matchDetails.man_of_match);
-        embed.addFields({
-          name: '⭐ Homme du Match',
-          value: motmName,
+        )
+        .addFields({
+          name: '🔗 Lien',
+          value: `[Voir sur Soccerverse](https://play.soccerverse.com/club/${clubId})`,
           inline: false
-        });
-      }
-
-      if (matchDetails.attendance) {
-        embed.addFields({
-          name: '👥 Affluence',
-          value: `${matchDetails.attendance.toLocaleString()} spectateurs`,
-          inline: true
-        });
-      }
-    } else {
-      embed.addFields(
-        {
-          name: '📊 Performance',
-          value: `**${clubName}**\n⚽ Buts marqués: ${clubGoals}\n🥅 Buts encaissés: ${opponentGoals}\n📍 ${venue}`,
-          inline: true
-        },
-        {
-          name: '🆚 Adversaire',
-          value: `**${opponentName}**\n⚽ Buts marqués: ${opponentGoals}\n🥅 Buts encaissés: ${clubGoals}\n👤 ${isHome ? match.away_manager : match.home_manager || 'Inconnu'}`,
-          inline: true
+        })
+        .setFooter({ text: 'Soccerverse Bot v3.0' })
+        .setTimestamp();
+      
+      // Envoyer dans tous les canaux
+      for (const channelId of channels) {
+        try {
+          const channel = await this.client.channels.fetch(channelId);
+          await channel.send({ embeds: [embed] });
+          logger.info(`📤 Résultat envoyé: ${clubName} ${result} dans canal ${channelId}`);
+        } catch (error) {
+          logger.error(`Erreur envoi résultat canal ${channelId}:`, error.message);
         }
-      );
-
-      if (match.attendance) {
-        embed.addFields({
-          name: '👥 Affluence',
-          value: `${match.attendance.toLocaleString()} spectateurs`,
-          inline: true
-        });
       }
+      
+    } catch (error) {
+      logger.error('Erreur sendMatchResult:', error);
     }
+  }
 
-    embed.addFields({
-      name: '🔗 Actions',
-      value: `[Voir le club sur Soccerverse](https://play.soccerverse.com/club/${clubId})`,
-      inline: false
-    });
-
-    let contextMessage = '';
-    if (clubGoals > opponentGoals) {
-      contextMessage = '🎊 Félicitations pour cette belle victoire !';
-    } else if (clubGoals < opponentGoals) {
-      contextMessage = '💪 Ce n\'est qu\'un match, l\'important c\'est de continuer !';
-    } else {
-      contextMessage = '⚖️ Un point de pris face à un adversaire coriace !';
+  // =================== PERSISTENCE ===================
+  
+  loadProcessedMatches() {
+    try {
+      const settings = this.dataManager.getChannelSettings('_global_results');
+      
+      if (settings && settings.processedMatches) {
+        const map = new Map();
+        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        
+        for (const [key, data] of Object.entries(settings.processedMatches)) {
+          if (data.timestamp > thirtyDaysAgo) {
+            map.set(key, data);
+          }
+        }
+        
+        logger.info(`📦 ${map.size} match(s) déjà traité(s) chargé(s) depuis le cache`);
+        return map;
+      }
+    } catch (error) {
+      logger.warn('⚠️ Impossible de charger le cache des matchs:', error.message);
     }
     
-    embed.setFooter({ 
-      text: `${contextMessage} • Soccerverse Bot v3.0` 
-    })
-    .setTimestamp();
-
-    return embed;
+    return new Map();
   }
 
-  cleanupProcessedMatches() {
-    // 🔥 CORRECTION: 60 jours pour éviter les doublons après longue période d'inactivité
-    const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000);
-    let cleanedCount = 0;
-
-    for (const [key, matchData] of this.processedMatches.entries()) {
-      if (matchData.timestamp < sixtyDaysAgo) {
-        this.processedMatches.delete(key);
-        cleanedCount++;
+  async saveProcessedMatches() {
+    try {
+      const processedMatchesObj = {};
+      for (const [key, data] of this.processedMatches.entries()) {
+        processedMatchesObj[key] = data;
       }
-    }
-
-    if (cleanedCount > 0) {
-      this.saveProcessedMatches().catch(err => {
-        logger.error('Erreur sauvegarde après nettoyage:', err);
+      
+      this.dataManager.setChannelSettings('_global_results', {
+        processedMatches: processedMatchesObj,
+        lastSaved: Date.now()
       });
-      logger.info(`🧹 Cache nettoyé: ${cleanedCount} match(s) ancien(s) supprimé(s) (>60 jours)`);
+      
+      await this.dataManager.save();
+      logger.debug(`💾 ${this.processedMatches.size} match(s) traité(s) sauvegardé(s)`);
+    } catch (error) {
+      logger.error('❌ Erreur sauvegarde matchs traités:', error);
     }
-
-    const oneHourAgo = Date.now() - (60 * 60 * 1000);
-    for (const [key, attemptData] of this.matchAttempts.entries()) {
-      if (attemptData.lastAttempt < oneHourAgo) {
-        this.matchAttempts.delete(key);
-      }
-    }
-
-    logger.debug(`🧹 Nettoyage: ${this.processedMatches.size} matchs traités, ${this.matchAttempts.size} matchs en cours`);
   }
 
-  getResultStats() {
+  async saveMatchCache() {
+    try {
+      const cacheObj = {};
+      for (const [clubId, matches] of this.upcomingMatchesCache.entries()) {
+        cacheObj[clubId] = matches;
+      }
+      
+      this.dataManager.setChannelSettings('_global_match_cache', {
+        upcomingMatches: cacheObj,
+        lastUpdate: this.lastCacheUpdate
+      });
+      
+      await this.dataManager.save();
+      logger.debug(`💾 Cache matchs sauvegardé`);
+    } catch (error) {
+      logger.error('❌ Erreur sauvegarde cache matchs:', error);
+    }
+  }
+
+  // =================== STATISTIQUES & DEBUG ===================
+  
+  getStats() {
     return {
-      processedMatchesCount: this.processedMatches.size,
-      pendingMatchesCount: this.matchAttempts.size,
-      checkInterval: this.checkInterval / 1000,
-      firstAttemptDelay: this.firstAttemptDelay / 1000,
-      retryDelay: this.retryDelay / 1000,
-      maxRetries: this.maxRetries,
-      notificationDelay: this.notificationDelay / 1000,
-      method: 'Vérification toutes les 30s, 1er essai 15s après match, 3 tentatives espacées de 30s'
+      ...this.stats,
+      cachedClubs: this.upcomingMatchesCache.size,
+      totalCachedMatches: Array.from(this.upcomingMatchesCache.values())
+        .reduce((sum, matches) => sum + matches.length, 0),
+      scheduledChecks: this.scheduledChecks.size,
+      processedMatches: this.processedMatches.size,
+      lastCacheUpdate: this.lastCacheUpdate ? 
+        new Date(this.lastCacheUpdate).toLocaleString('fr-FR') : 'Jamais'
     };
   }
 
-  async forceCheckResults() {
-    logger.info('🔄 Vérification forcée résultats...');
-    await this.checkRecentMatches();
-  }
-
-  resetResultCache() {
-    this.processedMatches.clear();
-    this.matchAttempts.clear();
+  getNextMatches(limit = 10) {
+    const allMatches = [];
     
-    this.saveProcessedMatches().catch(err => {
-      logger.error('Erreur sauvegarde après reset:', err);
-    });
-    
-    logger.info('🔄 Cache résultats et tentatives réinitialisés');
-  }
-
-  debugProcessedMatches() {
-    logger.debug('=== MATCHS TRAITÉS DEBUG ===');
-    logger.debug(`Matchs notifiés: ${this.processedMatches.size}`);
-    for (const [key, matchData] of this.processedMatches.entries()) {
-      const timeAgo = Math.round((Date.now() - matchData.timestamp) / 60000);
-      logger.debug(`  ${key}: il y a ${timeAgo}min - Club ${matchData.clubId}`);
+    for (const [clubId, matches] of this.upcomingMatchesCache.entries()) {
+      for (const match of matches) {
+        allMatches.push({
+          clubId: clubId,
+          clubName: this.apiClient.getClubName(clubId),
+          matchDate: new Date(match.date * 1000),
+          homeClub: match.home_club_name,
+          awayClub: match.away_club_name,
+          checkTime: new Date((match.date + 15) * 1000)
+        });
+      }
     }
     
-    logger.debug(`\nMatchs en attente: ${this.matchAttempts.size}`);
-    for (const [key, attemptData] of this.matchAttempts.entries()) {
-      const timeAgo = Math.round((Date.now() - attemptData.lastAttempt) / 1000);
-      logger.debug(`  ${key}: ${attemptData.attempts}/${this.maxRetries} tentatives, dernière il y a ${timeAgo}s`);
-    }
-    logger.debug('=== FIN DEBUG MATCHS ===');
+    // Trier par date
+    allMatches.sort((a, b) => a.matchDate - b.matchDate);
+    
+    return allMatches.slice(0, limit);
   }
 }
 
