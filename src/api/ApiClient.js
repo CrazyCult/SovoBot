@@ -193,13 +193,21 @@ class ApiClient {
             ...this.getBotHeaders()
           }
         });
+            
+      if (response.data && response.data.error) {
+        logger.error(`❌ RPC Error: ${method}`, response.data.error);
+        throw new Error(`RPC Error: ${response.data.error.message || 'Unknown error'}`);
+      }
+      
+      // ✅ Gérer les deux formats : .result OU .data
+      if (response.data?.result !== undefined && response.data?.result !== null) {
+        return response.data.result;
+      } else if (response.data?.data !== undefined) {
+        return response.data.data;
+      } else {
+        return response.data;
+      } 
         
-        if (response.data && response.data.error) {
-          logger.error(`❌ RPC Error: ${method}`, response.data.error);
-          throw new Error(`RPC Error: ${response.data.error.message || 'Unknown error'}`);
-        }
-        
-        return response.data?.result;
       }, `RPC ${method}`);
       
       this.setCache(cacheKey, data);
