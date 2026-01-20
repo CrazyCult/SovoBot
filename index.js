@@ -5,13 +5,14 @@ const path = require('path');
 const logger = require('./src/utils/logger');
 const DataManager = require('./src/data/DataManager');
 const ApiClient = require('./src/api/ApiClient');
+const OrderbookWatcher = require('./src/services/OrderbookWatcher');
 const MatchNotificationWatcher = require('./src/services/MatchNotificationWatcher');
 const MatchResultWatcher = require('./src/services/MatchResultWatcher');
 const PolygonStalkerService = require('./src/services/PolygonStalkerService');
 const EncheresWatcher = require('./src/services/EncheresWatcher');
 const ClubNewsWatcher = require('./src/services/ClubNewsWatcher');
 const GasTrackerService = require('./src/services/GasTrackerService');
-const ClubFollowerWatcher = require('./src/services/ClubFollowerWatcher'); // 🆕 AJOUTÉ
+const ClubFollowerWatcher = require('./src/services/ClubFollowerWatcher');
 
 // Vérification du token Discord
 if (!process.env.DISCORD_TOKEN) {
@@ -42,7 +43,7 @@ class SoccerverseBot {
     this.encheresWatcher = null;
     this.clubNewsWatcher = null;
     this.gasTrackerService = null;
-    this.clubFollowerWatcher = null; // 🆕 AJOUTÉ
+    this.clubFollowerWatcher = null;
     
     // Charger les commandes
     this.loadCommands();
@@ -86,13 +87,18 @@ class SoccerverseBot {
       this.orderbookWatcher = new OrderbookWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('📊 Service de surveillance orderbook initialisé');
       
-      // Initialiser le service de surveillance des notifications de match
-      this.matchNotificationWatcher = new MatchNotificationWatcher(this.client, this.dataManager, this.apiClient);
-      logger.info('⚽ Service de notifications de match initialisé');
-      
-      // Initialiser le service de surveillance des résultats de match
+      // ✅ MODIFICATION 1/2: Initialiser matchResultWatcher EN PREMIER
       this.matchResultWatcher = new MatchResultWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('🏆 Service de notifications de résultats initialisé');
+      
+      // ✅ MODIFICATION 2/2: Passer matchResultWatcher au constructeur pour partager le cache
+      this.matchNotificationWatcher = new MatchNotificationWatcher(
+        this.client, 
+        this.dataManager, 
+        this.apiClient,
+        this.matchResultWatcher  // ✅ PARTAGE DU CACHE
+      );
+      logger.info('⚽ Service de notifications de composition initialisé (cache partagé)');
       
       // Initialiser le service de surveillance Stalker avec l'apiClient
       this.polygonStalkerService = new PolygonStalkerService(this.client, this.dataManager, this.apiClient);
@@ -111,7 +117,7 @@ class SoccerverseBot {
       this.gasTrackerService.start();
       logger.info('⛽ Service Gas Tracker Polygon démarré');
 
-      // 🆕 Initialiser le service de suivi des clubs
+      // Initialiser le service de suivi des clubs
       this.clubFollowerWatcher = new ClubFollowerWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('📊 Service de suivi des clubs initialisé');
     });
@@ -143,7 +149,7 @@ class SoccerverseBot {
           encheresWatcher: this.encheresWatcher,
           clubNewsWatcher: this.clubNewsWatcher,
           gasTrackerService: this.gasTrackerService,
-          clubFollowerWatcher: this.clubFollowerWatcher // 🆕 AJOUTÉ
+          clubFollowerWatcher: this.clubFollowerWatcher
         });
       } catch (error) {
         logger.error(`Erreur commande ${commandName}:`, error);
