@@ -1,3 +1,4 @@
+const logger = require('../utils/logger');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 module.exports = {
@@ -329,3 +330,4 @@ module.exports = {
     }
   }
 };
+
