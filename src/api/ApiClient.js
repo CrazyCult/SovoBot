@@ -163,41 +163,60 @@ class ApiClient {
   }
 
   async makeRpcRequest(method, params = {}) {
-    try {
-      const cacheKey = this.getCacheKey(method, params);
-      const cached = this.getFromCache(cacheKey);
-      
-      if (cached) {
-        logger.debug(`📦 Cache hit RPC: ${method}`);
-        return cached;
-      }
-      
-      logger.debug(`🌐 RPC call: ${method}`, params);
-      
-      const payload = {
-        jsonrpc: "2.0",
-        method: method,
-        params: params,
-        id: Date.now()
-      };
+  try {
+    const cacheKey = this.getCacheKey(method, params);
+    const cached = this.getFromCache(cacheKey);
+    
+    if (cached) {
+      logger.debug(`📦 Cache hit RPC: ${method}`);
+      return cached;
+    }
+    
+    logger.debug(`🌐 RPC call: ${method}`, params);
+    
+    const payload = {
+      jsonrpc: "2.0",
+      method: method,
+      params: params,
+      id: Date.now()
+    };
 
-      // ✅ UTILISER LE RATE LIMITER + CLOUDFLARE HEADERS
-      const data = await this.rateLimiter.execute(async () => {
-        const response = await axios.post(this.rpcUrl, payload, {
-          timeout: 15000,
-          headers: {
-            'Content-Type': 'application/json',
-            'Origin': 'https://play.soccerverse.com',           // ✅ CLOUDFLARE BYPASS
-            'Referer': 'https://play.soccerverse.com/',         // ✅ CLOUDFLARE BYPASS
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            ...this.getBotHeaders()
-          }
-        });
-            
+    // ✅ UTILISER LE RATE LIMITER + CLOUDFLARE HEADERS
+    const data = await this.rateLimiter.execute(async () => {
+      const response = await axios.post(this.rpcUrl, payload, {
+        timeout: 15000,
+        headers: {
+          'Content-Type': 'application/json',
+          'Origin': 'https://play.soccerverse.com',
+          'Referer': 'https://play.soccerverse.com/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          ...this.getBotHeaders()
+        }
+      });
+      
       if (response.data && response.data.error) {
         logger.error(`❌ RPC Error: ${method}`, response.data.error);
         throw new Error(`RPC Error: ${response.data.error.message || 'Unknown error'}`);
       }
+      
+      // ✅ Gérer les deux formats : .result OU .data
+      if (response.data?.result !== undefined && response.data?.result !== null) {
+        return response.data.result;
+      } else if (response.data?.data !== undefined) {
+        return response.data.data;
+      } else {
+        return response.data;
+      }
+    }, `RPC ${method}`);
+    
+    this.setCache(cacheKey, data);
+    return data;
+    
+  } catch (error) {
+    logger.error(`❌ Erreur RPC ${method}:`, error.message);
+    throw new Error(`Erreur RPC: ${error.message}`);
+  }
+}
       
       // ✅ Gérer les deux formats : .result OU .data
       if (response.data?.result !== undefined && response.data?.result !== null) {
