@@ -1,7 +1,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const MappingManager = require('../utils/MappingManager');
-const RateLimiter = require('../utils/RateLimiter');  // ✅ NOUVEAU
+const RateLimiter = require('../utils/RateLimiter');
 
 class ApiClient {
   constructor() {
@@ -123,7 +123,7 @@ class ApiClient {
     return `[${name}](https://play.soccerverse.com/club/${clubId})`;
   }
 
-  // =================== REQUÊTES API AVEC RATE LIMITING ===================
+  // =================== REQUÊTES API AVEC RATE LIMITING + CLOUDFLARE BYPASS ===================
   
   async makeRequest(endpoint, params = {}) {
     try {
@@ -137,14 +137,17 @@ class ApiClient {
       
       logger.debug(`🌐 API call: ${endpoint}`, params);
       
-      // ✅ UTILISER LE RATE LIMITER
+      // ✅ UTILISER LE RATE LIMITER + CLOUDFLARE HEADERS
       const data = await this.rateLimiter.execute(async () => {
         const response = await axios.get(`${this.baseUrl}${endpoint}`, {
           params,
           timeout: 10000,
           headers: {
-            ...this.getBotHeaders(),
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Origin': 'https://play.soccerverse.com',           // ✅ CLOUDFLARE BYPASS
+            'Referer': 'https://play.soccerverse.com/',         // ✅ CLOUDFLARE BYPASS
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ...this.getBotHeaders()
           }
         });
         return response.data;
@@ -178,14 +181,14 @@ class ApiClient {
         id: Date.now()
       };
 
-      // ✅ UTILISER LE RATE LIMITER
+      // ✅ UTILISER LE RATE LIMITER + CLOUDFLARE HEADERS
       const data = await this.rateLimiter.execute(async () => {
         const response = await axios.post(this.rpcUrl, payload, {
           timeout: 15000,
           headers: {
             'Content-Type': 'application/json',
-            'Origin': 'https://play.soccerverse.com',
-            'Referer': 'https://play.soccerverse.com/',
+            'Origin': 'https://play.soccerverse.com',           // ✅ CLOUDFLARE BYPASS
+            'Referer': 'https://play.soccerverse.com/',         // ✅ CLOUDFLARE BYPASS
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             ...this.getBotHeaders()
           }
@@ -556,6 +559,18 @@ class ApiClient {
     
     const date = new Date(unix * 1000);
     return date.toLocaleString('fr-FR');
+  }
+
+  formatForm(form) {
+    if (!form || form.length === 0) return 'Aucun match récent';
+    
+    const formArray = form.split('');
+    return formArray.map(result => {
+      if (result === 'W') return '🟢';
+      if (result === 'D') return '🟡';
+      if (result === 'L') return '🔴';
+      return '⚪';
+    }).join(' ');
   }
 }
 
