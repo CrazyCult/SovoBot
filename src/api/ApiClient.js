@@ -1,11 +1,15 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const MappingManager = require('../utils/MappingManager');
+const RateLimiter = require('../utils/RateLimiter');  // ✅ NOUVEAU
 
 class ApiClient {
   constructor() {
     this.baseUrl = 'https://services.soccerverse.com/api';
-    this.rpcUrl = 'https://gsppub.soccerverse.io/';
+    this.rpcUrl = 'https://services.soccerverse.com/gsp/';
+    
+    // ✅ RATE LIMITER GLOBAL (3 requêtes/seconde)
+    this.rateLimiter = new RateLimiter(3);
     
     // ✅ IDENTIFICATION DU BOT
     this.botIdentity = {
@@ -119,7 +123,7 @@ class ApiClient {
     return `[${name}](https://play.soccerverse.com/club/${clubId})`;
   }
 
-  // =================== REQUÊTES API ===================
+  // =================== REQUÊTES API AVEC RATE LIMITING ===================
   
   async makeRequest(endpoint, params = {}) {
     try {
@@ -133,17 +137,21 @@ class ApiClient {
       
       logger.debug(`🌐 API call: ${endpoint}`, params);
       
-      const response = await axios.get(`${this.baseUrl}${endpoint}`, {
-        params,
-        timeout: 10000,
-        headers: {
-          ...this.getBotHeaders(),
-          'Content-Type': 'application/json'
-        }
-      });
+      // ✅ UTILISER LE RATE LIMITER
+      const data = await this.rateLimiter.execute(async () => {
+        const response = await axios.get(`${this.baseUrl}${endpoint}`, {
+          params,
+          timeout: 10000,
+          headers: {
+            ...this.getBotHeaders(),
+            'Content-Type': 'application/json'
+          }
+        });
+        return response.data;
+      }, `GET ${endpoint}`);
       
-      this.setCache(cacheKey, response.data);
-      return response.data;
+      this.setCache(cacheKey, data);
+      return data;
       
     } catch (error) {
       logger.error(`❌ Erreur API ${endpoint}:`, error.message);
@@ -170,27 +178,48 @@ class ApiClient {
         id: Date.now()
       };
 
-      const response = await axios.post(this.rpcUrl, payload, {
-        timeout: 15000,
-        headers: {
-          ...this.getBotHeaders(),
-          'Content-Type': 'application/json'
+      // ✅ UTILISER LE RATE LIMITER
+      const data = await this.rateLimiter.execute(async () => {
+        const response = await axios.post(this.rpcUrl, payload, {
+          timeout: 15000,
+          headers: {
+            'Content-Type': 'application/json',
+            'Origin': 'https://play.soccerverse.com',
+            'Referer': 'https://play.soccerverse.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ...this.getBotHeaders()
+          }
+        });
+        
+        if (response.data && response.data.error) {
+          logger.error(`❌ RPC Error: ${method}`, response.data.error);
+          throw new Error(`RPC Error: ${response.data.error.message || 'Unknown error'}`);
         }
-      });
+        
+        return response.data?.result;
+      }, `RPC ${method}`);
       
-      if (response.data && response.data.error) {
-        logger.error(`❌ RPC Error: ${method}`, response.data.error);
-        throw new Error(`RPC Error: ${response.data.error.message || 'Unknown error'}`);
-      }
-      
-      const result = response.data?.result;
-      this.setCache(cacheKey, result);
-      return result;
+      this.setCache(cacheKey, data);
+      return data;
       
     } catch (error) {
       logger.error(`❌ Erreur RPC ${method}:`, error.message);
       throw new Error(`Erreur RPC: ${error.message}`);
     }
+  }
+
+  // =================== STATISTIQUES RATE LIMITER ===================
+  
+  getRateLimiterStats() {
+    return this.rateLimiter.getStats();
+  }
+  
+  resetRateLimiterStats() {
+    this.rateLimiter.resetStats();
+  }
+  
+  clearRateLimiterQueue() {
+    return this.rateLimiter.clearQueue();
   }
 
   // =================== MÉTHODES CLUBS ===================
@@ -212,9 +241,7 @@ class ApiClient {
     return club;
   }
 
-  // 🆕 MÉTHODE CORRIGÉE: Utiliser get_seasons pour détecter automatiquement la saison courante
   async getCurrentSeason() {
-    // Vérifier le cache (valable 24h)
     if (this.currentSeasonCache && this.currentSeasonCacheTime) {
       const age = Date.now() - this.currentSeasonCacheTime;
       if (age < this.seasonCacheTimeout) {
@@ -223,54 +250,95 @@ class ApiClient {
       }
     }
 
-    // ✅ NOUVELLE MÉTHODE: Utiliser get_seasons (qui existe vraiment!)
     try {
-      const seasons = await this.makeRpcRequest('get_seasons', {});
+      const result = await this.makeRpcRequest('get_seasons', {});
       
-      if (seasons && Array.isArray(seasons)) {
-        // Chercher la saison non terminée (finished: false)
-        const currentSeason = seasons.find(s => s.finished === false);
-        
-        if (currentSeason && currentSeason.season_id) {
-          this.currentSeasonCache = currentSeason.season_id;
-          this.currentSeasonCacheTime = Date.now();
-          logger.info(`✅ Saison courante détectée: ${currentSeason.season_id} (${currentSeason.name || 'Sans nom'})`);
-          return currentSeason.season_id;
-        }
-        
-        // Si aucune saison non terminée, prendre la dernière
-        const lastSeason = seasons[seasons.length - 1];
-        if (lastSeason && lastSeason.season_id) {
-          this.currentSeasonCache = lastSeason.season_id;
-          this.currentSeasonCacheTime = Date.now();
-          logger.info(`✅ Saison courante détectée (dernière): ${lastSeason.season_id} (${lastSeason.name || 'Sans nom'})`);
-          return lastSeason.season_id;
-        }
+      let seasons = [];
+      if (Array.isArray(result)) {
+        seasons = result;
+      } else if (result && Array.isArray(result.data)) {
+        seasons = result.data;
       }
+      
+      if (seasons.length === 0) {
+        logger.warn('⚠️ Aucune saison retournée par get_seasons, fallback sur 3');
+        this.currentSeasonCache = 3;
+        this.currentSeasonCacheTime = Date.now();
+        return 3;
+      }
+      
+      const currentSeason = seasons.find(s => s.is_current === 1 || s.is_current === true);
+      
+      if (currentSeason) {
+        this.currentSeasonCache = currentSeason.season_id;
+        this.currentSeasonCacheTime = Date.now();
+        logger.info(`✅ Saison courante détectée: ${this.currentSeasonCache}`);
+        return this.currentSeasonCache;
+      }
+      
+      const latestSeason = Math.max(...seasons.map(s => s.season_id));
+      this.currentSeasonCache = latestSeason;
+      this.currentSeasonCacheTime = Date.now();
+      logger.info(`✅ Saison courante (dernière): ${this.currentSeasonCache}`);
+      return this.currentSeasonCache;
+      
     } catch (error) {
       logger.warn(`⚠️ get_seasons non disponible: ${error.message}`);
+      logger.warn('⚠️ Impossible de déterminer la saison dynamiquement, utilisation de la saison 3 par défaut');
+      
+      this.currentSeasonCache = 3;
+      this.currentSeasonCacheTime = Date.now();
+      return 3;
     }
-
-    // ✅ FALLBACK: Hardcodé sur saison 3
-    logger.warn('⚠️ Impossible de déterminer la saison dynamiquement, utilisation de la saison 3 par défaut');
-    this.currentSeasonCache = 3;
-    this.currentSeasonCacheTime = Date.now();
-    return 3;
   }
 
-  // Méthode pour obtenir la saison sans faire d'appels API
   getCurrentSeasonCached() {
     if (this.currentSeasonCache) {
       return this.currentSeasonCache;
     }
-    return 3; // Fallback sans appel API
+    return 3;
   }
 
-  // Forcer le refresh du cache (admin uniquement)
-  async refreshCurrentSeason() {
-    this.currentSeasonCache = null;
-    this.currentSeasonCacheTime = null;
-    return await this.getCurrentSeason();
+  async getClubSchedule(clubId, limit = 20) {
+    if (!clubId || isNaN(clubId)) {
+      throw new Error('ID de club invalide');
+    }
+    
+    const currentSeason = await this.getCurrentSeason();
+    
+    const result = await this.makeRpcRequest('get_club_schedule', {
+      club_id: parseInt(clubId),
+      season_id: currentSeason
+    });
+    
+    let matches = [];
+    if (result && Array.isArray(result)) {
+      matches = result;
+    } else if (result && result.data && Array.isArray(result.data)) {
+      matches = result.data;
+    }
+    
+    if (matches.length === 0) {
+      throw new Error(`Aucun match trouvé pour le club ${clubId} en saison ${currentSeason}`);
+    }
+    
+    const sortedMatches = matches.sort((a, b) => b.date - a.date);
+    
+    const enrichedMatches = sortedMatches.map(match => ({
+      ...match,
+      home_club_name: this.getClubName(match.home_club),
+      away_club_name: this.getClubName(match.away_club),
+      stadium_name: this.getStadiumName(match.stadium_id),
+      country_name: this.formatCountryName(match.country_id),
+      competition_type: this.getCompetitionType(match.comp_type),
+      season_id: currentSeason
+    }));
+    
+    return enrichedMatches.slice(0, limit);
+  }
+
+  async getClubMatches(clubId, limit = 20) {
+    return await this.getClubSchedule(clubId, limit);
   }
 
   async getClubLastMatch(clubId) {
@@ -279,7 +347,6 @@ class ApiClient {
     }
     
     try {
-      // Essayer les saisons 3 et 2
       for (const seasonId of [3, 2]) {
         const result = await this.makeRpcRequest('get_club_schedule', {
           club_id: parseInt(clubId),
@@ -353,42 +420,6 @@ class ApiClient {
     return enrichedMatch;
   }
 
-  async getClubSchedule(clubId, limit = 20) {
-    if (!clubId || isNaN(clubId)) {
-      throw new Error('ID de club invalide');
-    }
-    
-    // Utiliser le cache au lieu d'appeler l'API à chaque fois
-    const currentSeason = this.getCurrentSeasonCached();
-    
-    const result = await this.makeRpcRequest('get_club_schedule', {
-      club_id: parseInt(clubId),
-      season_id: currentSeason
-    });
-    
-    if (!result || !Array.isArray(result)) {
-      throw new Error(`Aucun match trouvé pour le club ${clubId} en saison ${currentSeason}`);
-    }
-    
-    const matches = result.sort((a, b) => b.date - a.date);
-    
-    const enrichedMatches = matches.map(match => ({
-      ...match,
-      home_club_name: this.getClubName(match.home_club),
-      away_club_name: this.getClubName(match.away_club),
-      stadium_name: this.getStadiumName(match.stadium_id),
-      country_name: this.formatCountryName(match.country_id),
-      competition_type: this.getCompetitionType(match.comp_type),
-      season_id: currentSeason
-    }));
-    
-    return enrichedMatches.slice(0, limit);
-  }
-
-  async getClubMatches(clubId, limit = 20) {
-    return await this.getClubSchedule(clubId, limit);
-  }
-
   async searchClubs(searchTerm, limit = 10) {
     const searchResults = this.mappingManager.searchClubs(searchTerm, limit);
     const results = [];
@@ -405,78 +436,40 @@ class ApiClient {
     return results;
   }
 
-  // =================== MÉTHODES TRANSFERTS ===================
-
-  /**
-   * 🆕 Récupère l'historique de transfert d'un joueur
-   * @param {number} playerId - ID du joueur
-   * @returns {Array} Liste des transferts (du plus récent au plus ancien)
-   */
-  async getPlayerTransferHistory(playerId) {
-    if (!playerId || isNaN(playerId)) {
-      throw new Error('ID de joueur invalide');
-    }
-    
-    const data = await this.makeRequest('/player/transfer_history', {
-      player_id: parseInt(playerId)
-    });
-    
-    // L'API retourne un array de transferts
-    // Structure de chaque transfert:
-    // {
-    //   player_id: number,
-    //   date: timestamp,
-    //   club_id_from: number,
-    //   club_id_to: number,
-    //   amount: number (en centimes)
-    // }
-    
-    if (!Array.isArray(data)) {
-      logger.warn(`Format inattendu pour historique transfert joueur ${playerId}`);
-      return [];
-    }
-    
-    logger.debug(`📜 Historique transfert joueur ${playerId}: ${data.length} transfert(s)`);
-    
-    return data;
-  }
-
-  // =================== MÉTHODES CLASSEMENTS ===================
-  
   async getLeagueTable(leagueId) {
     if (!leagueId || isNaN(leagueId)) {
       throw new Error('ID de ligue invalide');
     }
-
-    let data;
-    try {
-      data = await this.makeRequest('/league_tables', {
-        league_id: parseInt(leagueId),
-        limit: 100,
-        all: true
-      });
-    } catch (error) {
-      data = await this.makeRequest('/league_tables', { league_id: parseInt(leagueId) });
-    }
     
-    if (!data || !Array.isArray(data)) {
+    const result = await this.makeRpcRequest('get_league_table', {
+      league_id: parseInt(leagueId)
+    });
+    
+    if (!result || !Array.isArray(result)) {
       throw new Error(`Classement introuvable pour la ligue ${leagueId}`);
     }
-
-    logger.debug(`📊 Classement ligue ${leagueId}: ${data.length} équipes`);
-
-    const sortedTable = data.sort((a, b) => a.new_position - b.new_position);
     
-    const enrichedTable = sortedTable.map(team => ({
-      ...team,
-      club_name: this.getClubName(team.club_id)
+    return result.map(entry => ({
+      ...entry,
+      club_name: this.getClubName(entry.club_id)
     }));
-    
-    return enrichedTable;
   }
 
-  // =================== UTILITAIRES FORMAT ===================
+  // =================== MÉTHODES UTILITAIRES ===================
   
+  getCompetitionType(compType) {
+    const types = {
+      0: 'Match de championnat',
+      1: 'Match de coupe nationale',
+      2: 'Match amical',
+      3: 'Match de barrage',
+      4: 'Match de coupe continentale',
+      5: 'Match de coupe mondiale'
+    };
+    
+    return types[compType] || `Match (type ${compType})`;
+  }
+
   formatMoney(amount) {
     if (!amount || amount === 0) return '0$';
     
@@ -562,94 +555,7 @@ class ApiClient {
     if (!unix) return 'Jamais';
     
     const date = new Date(unix * 1000);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-    
-    if (diffHours < 1) {
-      return 'Il y a moins d\'1h';
-    } else if (diffHours < 24) {
-      return `Il y a ${diffHours}h`;
-    } else if (diffDays < 7) {
-      return `Il y a ${diffDays}j`;
-    } else {
-      return date.toLocaleDateString('fr-FR');
-    }
-  }
-  
-  formatForm(form) {
-    if (!form) return 'Aucune';
-    
-    return form.split('').map(char => {
-      switch (char) {
-        case 'W': return '🟢';
-        case 'D': return '🟡';
-        case 'L': return '🔴';
-        default: return '⚪';
-      }
-    }).join('');
-  }
-
-  getCompetitionType(compType) {
-    switch(compType) {
-      case 0: return '🏆 Championnat';
-      case 1: return '🏅 Coupe';
-      default: return '⚽ Match';
-    }
-  }
-
-  formatMatchDate(unixTimestamp) {
-    const date = new Date(unixTimestamp * 1000);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffDays = Math.floor(diffHours / 24);
-    
-    if (diffMs < 0) {
-      const futureDiffMs = Math.abs(diffMs);
-      const futureDiffHours = Math.floor(futureDiffMs / (1000 * 60 * 60));
-      const futureDiffDays = Math.floor(futureDiffHours / 24);
-      
-      if (futureDiffHours < 24) {
-        return `Dans ${futureDiffHours}h`;
-      } else if (futureDiffDays < 7) {
-        return `Dans ${futureDiffDays}j`;
-      } else {
-        return date.toLocaleDateString('fr-FR');
-      }
-    }
-    
-    if (diffHours < 1) {
-      return 'Il y a moins d\'1h';
-    } else if (diffHours < 24) {
-      return `Il y a ${diffHours}h`;
-    } else if (diffDays < 7) {
-      return `Il y a ${diffDays}j`;
-    } else {
-      return date.toLocaleDateString('fr-FR');
-    }
-  }
-
-  formatMatchResult(match, clubId) {
-    const isHome = match.home_club === parseInt(clubId);
-    const clubGoals = isHome ? match.home_goals : match.away_goals;
-    const opponentGoals = isHome ? match.away_goals : match.home_goals;
-    
-    let result = '';
-    if (match.played === 1) {
-      if (clubGoals > opponentGoals) {
-        result = '🟢 V';
-      } else if (clubGoals < opponentGoals) {
-        result = '🔴 D';
-      } else {
-        result = '🟡 N';
-      }
-    } else {
-      result = '⏳ À venir';
-    }
-    
-    return result;
+    return date.toLocaleString('fr-FR');
   }
 }
 
