@@ -35,7 +35,7 @@ class SoccerverseBot {
     this.commands = new Map();
     
     // Services de surveillance (seront initialisés après le login)
-    this.orderbookWatcher = null;
+    // ❌ SUPPRIMÉ: this.orderbookWatcher = null;
     this.matchNotificationWatcher = null;
     this.matchResultWatcher = null;
     this.polygonStalkerService = null;
@@ -82,24 +82,22 @@ class SoccerverseBot {
       // Définir le statut
       this.client.user.setActivity('⚽ Soccerverse | !help', { type: 'WATCHING' });
       
-      // Initialiser le service de surveillance orderbook
-      this.orderbookWatcher = new OrderbookWatcher(this.client, this.dataManager, this.apiClient);
-      logger.info('📊 Service de surveillance orderbook initialisé');
+      // ❌ SUPPRIMÉ: Initialiser le service de surveillance orderbook
       
-      // ✅ MODIFICATION 1/2: Initialiser matchResultWatcher EN PREMIER
+      // ✅ Initialiser matchResultWatcher EN PREMIER
       this.matchResultWatcher = new MatchResultWatcher(this.client, this.dataManager, this.apiClient);
       logger.info('🏆 Service de notifications de résultats initialisé');
       
-      // ✅ MODIFICATION 2/2: Passer matchResultWatcher au constructeur pour partager le cache
+      // ✅ Passer matchResultWatcher pour partager le cache
       this.matchNotificationWatcher = new MatchNotificationWatcher(
         this.client, 
         this.dataManager, 
         this.apiClient,
-        this.matchResultWatcher  // ✅ PARTAGE DU CACHE
+        this.matchResultWatcher  // ✅ CACHE PARTAGÉ
       );
       logger.info('⚽ Service de notifications de composition initialisé (cache partagé)');
       
-      // Initialiser le service de surveillance Stalker avec l'apiClient
+      // Initialiser le service de surveillance Stalker
       this.polygonStalkerService = new PolygonStalkerService(this.client, this.dataManager, this.apiClient);
       logger.info('👥 Service Stalker Soccerverse initialisé');
       
@@ -141,7 +139,7 @@ class SoccerverseBot {
         await command.execute(message, args, {
           apiClient: this.apiClient,
           dataManager: this.dataManager,
-          orderbookWatcher: this.orderbookWatcher,
+          // ❌ SUPPRIMÉ: orderbookWatcher: this.orderbookWatcher,
           matchNotificationWatcher: this.matchNotificationWatcher,
           matchResultWatcher: this.matchResultWatcher,
           polygonStalkerService: this.polygonStalkerService,
@@ -193,12 +191,7 @@ class SoccerverseBot {
         case 'unregister':
           await this.handleUnregisterButton(interaction, params[0]);
           break;
-        case 'orderbook':
-          await this.handleOrderbookButton(interaction, params);
-          break;
-        case 'watchlist':
-          await this.handleWatchlistButton(interaction, params);
-          break;
+        // ❌ SUPPRIMÉ: case 'orderbook' et 'watchlist'
         case 'stalker':
           await this.handleStalkerButton(interaction, params);
           break;
@@ -233,7 +226,7 @@ class SoccerverseBot {
     if (!clubId) {
       await interaction.reply({
         content: '❌ ID de club manquant.',
-        flags: 64 // Ephemeral flag
+        flags: 64
       });
       return;
     }
@@ -244,7 +237,7 @@ class SoccerverseBot {
     if (isRegistered) {
       await interaction.reply({ 
         content: '⚠️ Ce club est déjà enregistré dans ce salon.', 
-        flags: 64 // Ephemeral flag 
+        flags: 64
       });
       return;
     }
@@ -254,7 +247,7 @@ class SoccerverseBot {
 
     await interaction.reply({
       content: `✅ Club ID ${clubId} enregistré ! Vous recevrez les notifications (avec mentions) dans ce salon.`,
-      flags: 64 // Ephemeral flag
+      flags: 64
     });
   }
 
@@ -265,7 +258,7 @@ class SoccerverseBot {
     if (!isRegistered) {
       await interaction.reply({ 
         content: '⚠️ Ce club n\'est pas enregistré dans ce salon.', 
-        flags: 64 // Ephemeral flag 
+        flags: 64
       });
       return;
     }
@@ -275,157 +268,8 @@ class SoccerverseBot {
     
     await interaction.reply({ 
       content: `✅ Club ID ${clubId} retiré des notifications.`, 
-      flags: 64 // Ephemeral flag 
+      flags: 64
     });
-  }
-
-  async handleOrderbookButton(interaction, params) {
-    const [action, clubId] = params;
-    const channelId = interaction.channel.id;
-    
-    switch (action) {
-      case 'watch':
-        await interaction.reply({
-          content: '🔍 **Configurer la surveillance des ordres**\n\n' +
-                   'Utilisez la commande suivante pour définir vos critères :\n' +
-                   `\`!orderbook ${clubId} <prix_min> <prix_max>\`\n\n` +
-                   '**Exemples :**\n' +
-                   `• \`!orderbook ${clubId} 1000 5000\` - Surveiller les ordres entre 1000$ et 5000$\n` +
-                   `• \`!orderbook ${clubId} 2000\` - Surveiller les ordres à partir de 2000$\n\n` +
-                   '**Note :** La surveillance se déclenchera automatiquement quand vous utiliserez des critères de prix.',
-          flags: 64 // Ephemeral flag
-        });
-        break;
-        
-      case 'stop':
-        if (this.orderbookWatcher) {
-          this.orderbookWatcher.disableWatching(channelId, parseInt(clubId));
-          await this.dataManager.save();
-          
-          await interaction.reply({
-            content: `✅ Surveillance des ordres arrêtée pour le club #${clubId}.`,
-            flags: 64 // Ephemeral flag
-          });
-        }
-        break;
-        
-      case 'refresh':
-        try {
-          const orderbookCommand = this.commands.get('orderbook');
-          if (orderbookCommand) {
-            await interaction.deferReply();
-            
-            const simulatedMessage = {
-              channel: interaction.channel,
-              reply: async (options) => {
-                await interaction.editReply(options);
-              }
-            };
-            
-            await orderbookCommand.execute(simulatedMessage, [clubId], {
-              apiClient: this.apiClient,
-              dataManager: this.dataManager,
-              orderbookWatcher: this.orderbookWatcher,
-              matchNotificationWatcher: this.matchNotificationWatcher,
-              matchResultWatcher: this.matchResultWatcher,
-              polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher,
-              clubNewsWatcher: this.clubNewsWatcher,
-              gasTrackerService: this.gasTrackerService,
-              clubFollowerWatcher: this.clubFollowerWatcher
-            });
-          }
-        } catch (error) {
-          await interaction.reply({
-            content: '❌ Erreur lors de l\'actualisation de l\'orderbook.',
-            flags: 64 // Ephemeral flag
-          });
-        }
-        break;
-        
-      default:
-        await interaction.reply({ 
-          content: '❌ Action orderbook non reconnue.', 
-          flags: 64 // Ephemeral flag 
-        });
-    }
-  }
-
-  async handleWatchlistButton(interaction, params) {
-    const [action] = params;
-    const channelId = interaction.channel.id;
-    
-    switch (action) {
-      case 'stop':
-      case 'all':
-        const settings = this.dataManager.getChannelSettings(channelId);
-        const orderbookWatching = settings.orderbookWatching || {};
-        
-        const activeWatches = Object.entries(orderbookWatching)
-          .filter(([clubId, config]) => config.enabled);
-        
-        if (activeWatches.length === 0) {
-          await interaction.reply({
-            content: '⚠️ Aucune surveillance active à arrêter.',
-            flags: 64 // Ephemeral flag
-          });
-          return;
-        }
-        
-        for (const [clubId, config] of activeWatches) {
-          if (this.orderbookWatcher) {
-            this.orderbookWatcher.disableWatching(channelId, parseInt(clubId));
-          }
-        }
-        await this.dataManager.save();
-        
-        await interaction.reply({
-          content: `✅ ${activeWatches.length} surveillance(s) arrêtée(s) avec succès.`,
-          flags: 64 // Ephemeral flag
-        });
-        break;
-        
-      case 'refresh':
-        try {
-          const watchlistCommand = this.commands.get('watchlist');
-          if (watchlistCommand) {
-            await interaction.deferReply();
-            
-            const simulatedMessage = {
-              channel: interaction.channel,
-              reply: async (options) => {
-                await interaction.editReply(options);
-              }
-            };
-            
-            await watchlistCommand.execute(simulatedMessage, [], {
-              apiClient: this.apiClient,
-              dataManager: this.dataManager,
-              orderbookWatcher: this.orderbookWatcher,
-              matchNotificationWatcher: this.matchNotificationWatcher,
-              matchResultWatcher: this.matchResultWatcher,
-              polygonStalkerService: this.polygonStalkerService,
-              encheresWatcher: this.encheresWatcher,
-              clubNewsWatcher: this.clubNewsWatcher,
-              gasTrackerService: this.gasTrackerService,
-              clubFollowerWatcher: this.clubFollowerWatcher
-            });
-          }
-        } catch (error) {
-          logger.error('Erreur actualisation watchlist:', error);
-          await interaction.reply({
-            content: '❌ Erreur lors de l\'actualisation de la watchlist.',
-            flags: 64 // Ephemeral flag
-          });
-        }
-        break;
-        
-      default:
-        await interaction.reply({ 
-          content: '❌ Action watchlist non reconnue.', 
-          flags: 64 // Ephemeral flag 
-        });
-    }
   }
 
   async handleStalkerButton(interaction, params) {
@@ -435,7 +279,6 @@ class SoccerverseBot {
     switch (action) {
       case 'stop':
       case 'all':
-        // Arrêter toutes les surveillances stalker
         if (this.polygonStalkerService) {
           const stoppedCount = await this.polygonStalkerService.stopAllWatchingInChannel(channelId);
           await this.dataManager.save();
@@ -443,12 +286,12 @@ class SoccerverseBot {
           if (stoppedCount > 0) {
             await interaction.reply({
               content: `✅ ${stoppedCount} surveillance(s) stalker arrêtée(s) avec succès.`,
-              flags: 64 // Ephemeral flag
+              flags: 64
             });
           } else {
             await interaction.reply({
               content: '⚠️ Aucune surveillance stalker à arrêter.',
-              flags: 64 // Ephemeral flag
+              flags: 64
             });
           }
         }
@@ -457,7 +300,7 @@ class SoccerverseBot {
       default:
         await interaction.reply({ 
           content: '❌ Action stalker non reconnue.', 
-          flags: 64 // Ephemeral flag 
+          flags: 64
         });
     }
   }
@@ -474,7 +317,7 @@ class SoccerverseBot {
           
           await interaction.reply({
             content: '✅ Surveillance des enchères activée.',
-            flags: 64 // Ephemeral flag
+            flags: 64
           });
         }
         break;
@@ -486,7 +329,7 @@ class SoccerverseBot {
           
           await interaction.reply({
             content: '✅ Surveillance des enchères arrêtée.',
-            flags: 64 // Ephemeral flag
+            flags: 64
           });
         }
         break;
@@ -507,7 +350,6 @@ class SoccerverseBot {
             await encheresCommand.execute(simulatedMessage, ['status'], {
               apiClient: this.apiClient,
               dataManager: this.dataManager,
-              orderbookWatcher: this.orderbookWatcher,
               matchNotificationWatcher: this.matchNotificationWatcher,
               matchResultWatcher: this.matchResultWatcher,
               polygonStalkerService: this.polygonStalkerService,
@@ -520,7 +362,7 @@ class SoccerverseBot {
         } catch (error) {
           await interaction.reply({
             content: '❌ Erreur lors de l\'affichage du statut.',
-            flags: 64 // Ephemeral flag
+            flags: 64
           });
         }
         break;
@@ -528,13 +370,12 @@ class SoccerverseBot {
       default:
         await interaction.reply({ 
           content: '❌ Action enchères non reconnue.', 
-          flags: 64 // Ephemeral flag 
+          flags: 64
         });
     }
   }
 
   async handleCompositionButton(interaction, params) {
-    // params[0] = 'done', params[1] = clubId, params[2] = matchDate
     const subAction = params[0];
     const clubId = params[1];
     const matchDate = params[2];
@@ -542,7 +383,7 @@ class SoccerverseBot {
     if (subAction !== 'done') {
       await interaction.reply({
         content: '❌ Action non reconnue.',
-        flags: 64 // Ephemeral flag
+        flags: 64
       });
       return;
     }
@@ -550,13 +391,12 @@ class SoccerverseBot {
     if (!clubId || !matchDate) {
       await interaction.reply({
         content: '❌ Données manquantes pour marquer la composition.',
-        flags: 64 // Ephemeral flag
+        flags: 64
       });
       return;
     }
 
     try {
-      // Vérifier si déjà marquée
       const alreadyCompleted = this.dataManager.isCompositionCompleted(clubId, matchDate);
 
       if (alreadyCompleted) {
@@ -564,16 +404,14 @@ class SoccerverseBot {
         const completedBy = completionData.completedBy;
         await interaction.reply({
           content: `ℹ️ La composition pour ce match a déjà été marquée comme complétée ${completedBy ? `par <@${completedBy}>` : ''}.`,
-          flags: 64 // Ephemeral flag
+          flags: 64
         });
         return;
       }
 
-      // Marquer comme complétée
       this.dataManager.markCompositionCompleted(clubId, matchDate, interaction.user.id);
       await this.dataManager.save();
 
-      // Désactiver le bouton dans le message original
       try {
         const disabledButton = new (require('discord.js').ButtonBuilder)()
           .setCustomId(`composition_done_${clubId}_${matchDate}`)
@@ -591,10 +429,9 @@ class SoccerverseBot {
         logger.info(`✅ Composition marquée complétée: Club ${clubId}, Match ${matchDate} par ${interaction.user.id}`);
       } catch (updateError) {
         logger.error('Erreur mise à jour bouton:', updateError);
-        // Répondre quand même même si la mise à jour du bouton échoue
         await interaction.reply({
           content: '✅ Composition marquée comme complétée ! Vous ne recevrez plus de rappels pour ce match.',
-          flags: 64 // Ephemeral flag
+          flags: 64
         });
       }
 
@@ -602,7 +439,7 @@ class SoccerverseBot {
       logger.error('Erreur handleCompositionButton:', error);
       await interaction.reply({
         content: '❌ Une erreur est survenue lors du marquage de la composition.',
-        flags: 64 // Ephemeral flag
+        flags: 64
       });
     }
   }
