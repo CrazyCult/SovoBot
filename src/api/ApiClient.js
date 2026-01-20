@@ -440,22 +440,25 @@ class ApiClient {
   }
 
   async getLeagueTable(leagueId) {
-    if (!leagueId || isNaN(leagueId)) {
-      throw new Error('ID de ligue invalide');
-    }
-    
-    const result = await this.makeRpcRequest('get_league_table', {
-      league_id: parseInt(leagueId)
-    });
-    
-    if (!result || !Array.isArray(result)) {
-      throw new Error(`Classement introuvable pour la ligue ${leagueId}`);
-    }
-    
-    return result.map(entry => ({
-      ...entry,
-      club_name: this.getClubName(entry.club_id)
-    }));
+  if (!leagueId || isNaN(leagueId)) {
+    throw new Error('ID de ligue invalide');
+  }
+  
+  const result = await this.makeRpcRequest('get_league_table', {
+    league_id: parseInt(leagueId)
+  });
+  
+  // ✅ AJOUT TEMPORAIRE
+  logger.debug(`📊 get_league_table raw result:`, JSON.stringify(result, null, 2));
+  
+  if (!result || !Array.isArray(result)) {
+    throw new Error(`Classement introuvable pour la ligue ${leagueId}`);
+  }
+  
+  return result.map(entry => ({
+    ...entry,
+    club_name: this.getClubName(entry.club_id)
+  }));
   }
 
   // =================== MÉTHODES UTILITAIRES ===================
