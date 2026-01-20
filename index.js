@@ -5,7 +5,6 @@ const path = require('path');
 const logger = require('./src/utils/logger');
 const DataManager = require('./src/data/DataManager');
 const ApiClient = require('./src/api/ApiClient');
-const OrderbookWatcher = require('./src/services/OrderbookWatcher');
 const MatchNotificationWatcher = require('./src/services/MatchNotificationWatcher');
 const MatchResultWatcher = require('./src/services/MatchResultWatcher');
 const PolygonStalkerService = require('./src/services/PolygonStalkerService');
