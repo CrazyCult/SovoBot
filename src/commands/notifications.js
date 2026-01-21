@@ -75,7 +75,7 @@ module.exports = {
         },
         {
           name: '🏆 Notifications de Résultats',
-          value: resultStats ? 
+          value: resultStats ?
             `**Méthode:** ${resultStats.method}\n` +
             `**Délai:** ${resultStats.resultDelay} minute après le match\n` +
             `**Reprogrammation:** Toutes les ${resultStats.schedulingInterval}\n` +
@@ -127,8 +127,10 @@ module.exports = {
       // Test notifications de résultats
       if (matchResultWatcher) {
         try {
-          await matchResultWatcher.forceCheckResults();
-          resultResult = '✅ Succès';
+          // ✅ CORRECTION: Utiliser les bonnes méthodes
+          await matchResultWatcher.updateMatchCache();
+          await matchResultWatcher.scheduleAllMatches();
+          resultResult = '✅ Succès - Cache mis à jour et matchs reprogrammés';
         } catch (error) {
           resultResult = `❌ Erreur: ${error.message}`;
         }
