@@ -332,7 +332,7 @@ class ApiClient {
       throw new Error(`Aucun match trouvé pour le club ${clubId} en saison ${currentSeason}`);
     }
     
-    const sortedMatches = matches.sort((a, b) => b.date - a.date);
+    const sortedMatches = matches.sort((a, b) => a.date - b.date);
     
     const enrichedMatches = sortedMatches.map(match => ({
       ...match,
