@@ -90,12 +90,33 @@ class MatchResultWatcher {
       const now = Date.now() / 1000;
       const next7Days = now + (7 * 24 * 60 * 60); // 7 jours
       
+      logger.debug(`🔍 Paramètres de filtrage:`);
+      logger.debug(`  - Timestamp actuel: ${now} (${new Date(now * 1000).toLocaleString('fr-FR')})`);
+      logger.debug(`  - Fenêtre 7 jours: ${next7Days} (${new Date(next7Days * 1000).toLocaleString('fr-FR')})`);
+      logger.debug(`  - Clubs inscrits: ${registeredClubs.length}`);
+      
       let totalMatches = 0;
       
       for (const clubId of registeredClubs) {
         try {
-          // Récupérer les 5 prochains matchs du club
+          // Récupérer les prochains matchs du club
+          logger.debug(`🔍 Récupération matchs pour club ${clubId}...`);
           const matches = await this.apiClient.getClubSchedule(parseInt(clubId), 10);
+          
+          // ✅ DEBUG: Afficher ce que l'API retourne
+          logger.debug(`  📥 API retourne ${matches.length} match(s) pour club ${clubId}`);
+          
+          if (matches.length > 0) {
+            // Afficher les détails du premier match
+            const firstMatch = matches[0];
+            logger.debug(`  🔍 Premier match reçu:`);
+            logger.debug(`     - Date: ${firstMatch.date} (${new Date(firstMatch.date * 1000).toLocaleString('fr-FR')})`);
+            logger.debug(`     - Played: ${firstMatch.played}`);
+            logger.debug(`     - Home: ${firstMatch.home_club} vs Away: ${firstMatch.away_club}`);
+            logger.debug(`     - Dans le futur? ${firstMatch.date > now}`);
+            logger.debug(`     - Dans les 7 jours? ${firstMatch.date < next7Days}`);
+            logger.debug(`     - Non joué? ${firstMatch.played === 0}`);
+          }
           
           // Filtrer pour garder seulement les matchs à venir (7 prochains jours max)
           const upcomingMatches = matches.filter(match => 
@@ -104,21 +125,30 @@ class MatchResultWatcher {
             match.played === 0
           );
           
+          // ✅ DEBUG: Résultat du filtrage
+          logger.debug(`  ✅ Après filtrage: ${upcomingMatches.length} match(s) conservé(s)`);
+          
           if (upcomingMatches.length > 0) {
             this.upcomingMatchesCache.set(clubId, upcomingMatches);
             totalMatches += upcomingMatches.length;
             
-            logger.debug(`📌 Club ${clubId}: ${upcomingMatches.length} match(s) à venir`);
+            logger.debug(`📌 Club ${clubId}: ${upcomingMatches.length} match(s) à venir ajouté(s) au cache`);
+            
+            // Afficher tous les matchs conservés
+            upcomingMatches.forEach((match, index) => {
+              logger.debug(`   ${index + 1}. ${new Date(match.date * 1000).toLocaleString('fr-FR')}`);
+            });
           } else {
             // Retirer du cache si plus de matchs à venir
             this.upcomingMatchesCache.delete(clubId);
+            logger.debug(`⚠️ Club ${clubId}: Aucun match dans les 7 jours, retiré du cache`);
           }
           
           // Délai entre chaque club pour éviter de surcharger l'API
           await new Promise(resolve => setTimeout(resolve, 1000));
           
         } catch (error) {
-          logger.error(`Erreur récupération calendrier club ${clubId}:`, error.message);
+          logger.error(`❌ Erreur récupération calendrier club ${clubId}:`, error.message);
         }
       }
       
@@ -126,6 +156,7 @@ class MatchResultWatcher {
       this.stats.cacheUpdates++;
       
       logger.info(`✅ Cache mis à jour: ${totalMatches} match(s) programmé(s) pour ${registeredClubs.length} club(s)`);
+      logger.debug(`📊 Taille du cache: ${this.upcomingMatchesCache.size} club(s) avec matchs`);
       
       // Sauvegarder le cache
       await this.saveMatchCache();
@@ -147,13 +178,18 @@ class MatchResultWatcher {
     const now = Date.now() / 1000;
     let scheduledCount = 0;
     
+    logger.debug(`🔄 Programmation des vérifications de résultats...`);
+    logger.debug(`   Cache contient ${this.upcomingMatchesCache.size} club(s)`);
+    
     for (const [clubId, matches] of this.upcomingMatchesCache.entries()) {
+      logger.debug(`  📋 Club ${clubId}: ${matches.length} match(s) à programmer`);
+      
       for (const match of matches) {
         const matchKey = this.generateMatchKey(clubId, match);
         
         // Skip si déjà traité
         if (this.processedMatches.has(matchKey)) {
-          logger.debug(`Match déjà traité (skip): ${matchKey}`);
+          logger.debug(`     ⏭️ Match déjà traité (skip): ${matchKey}`);
           continue;
         }
         
@@ -172,10 +208,10 @@ class MatchResultWatcher {
           
           const matchDate = new Date(match.date * 1000);
           const checkDate = new Date(checkTime * 1000);
-          logger.debug(`⏰ Match programmé: Club ${clubId} - ${matchDate.toLocaleString('fr-FR')} → Vérif: ${checkDate.toLocaleString('fr-FR')}`);
+          logger.debug(`     ⏰ Programmé: ${matchDate.toLocaleString('fr-FR')} → Vérif: ${checkDate.toLocaleString('fr-FR')}`);
         } else {
           // Match dans le passé mais pas encore vérifié
-          logger.warn(`⚠️ Match passé non vérifié: Club ${clubId} - ${new Date(match.date * 1000).toLocaleString('fr-FR')}`);
+          logger.warn(`     ⚠️ Match passé non vérifié: ${new Date(match.date * 1000).toLocaleString('fr-FR')}`);
           
           // Vérifier immédiatement
           setTimeout(async () => {
@@ -349,38 +385,20 @@ class MatchResultWatcher {
         embedColor = '#FF6B6B';
       }
       
+      const venue = isHome ? '🏟️ Domicile' : '✈️ Extérieur';
+      
       const embed = new EmbedBuilder()
         .setColor(embedColor)
         .setTitle(`${resultEmoji} ${resultText}`)
-        .setDescription(
-          `**${match.home_club_name}** ${match.home_goals} - ${match.away_goals} **${match.away_club_name}**`
-        )
+        .setDescription(`**${clubName}** ${isHome ? match.home_goals : match.away_goals} - ${isHome ? match.away_goals : match.home_goals} **${opponentName}**`)
         .addFields(
-          {
-            name: '⚽ Compétition',
-            value: match.competition_type || 'Match de championnat',
-            inline: true
-          },
-          {
-            name: '🏟️ Stade',
-            value: match.stadium_name || 'Inconnu',
-            inline: true
-          },
-          {
-            name: '📅 Date',
-            value: new Date(match.date * 1000).toLocaleString('fr-FR'),
-            inline: true
-          }
+          { name: '⚽ Score final', value: result, inline: true },
+          { name: '📍 Lieu', value: venue, inline: true }
         )
-        .addFields({
-          name: '🔗 Lien',
-          value: `[Voir sur Soccerverse](https://play.soccerverse.com/club/${clubId})`,
-          inline: false
-        })
-        .setFooter({ text: 'Soccerverse Bot v3.0' })
+        .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
+        .setFooter({ text: 'Soccerverse Bot v3.0 • Résultat du match' })
         .setTimestamp();
       
-      // Envoyer dans tous les canaux
       for (const channelId of channels) {
         try {
           const channel = await this.client.channels.fetch(channelId);
@@ -470,9 +488,26 @@ class MatchResultWatcher {
         .reduce((sum, matches) => sum + matches.length, 0),
       scheduledChecks: this.scheduledChecks.size,
       processedMatches: this.processedMatches.size,
-      lastCacheUpdate: this.lastCacheUpdate ? 
+      lastCacheUpdate: this.lastCacheUpdate ?
         new Date(this.lastCacheUpdate).toLocaleString('fr-FR') : 'Jamais'
     };
+  }
+
+  getResultStats() {
+    return {
+      method: 'Cache + programmation précise',
+      resultDelay: '15 secondes',
+      schedulingInterval: '1x/jour à 3h',
+      processedMatchesCount: this.processedMatches.size,
+      cacheSize: this.upcomingMatchesCache.size,
+      scheduledChecksCount: this.scheduledChecks.size,
+      stats: this.stats
+    };
+  }
+
+  resetResultCache() {
+    this.processedMatches.clear();
+    logger.info('🔄 Cache des résultats réinitialisé');
   }
 
   getNextMatches(limit = 10) {
