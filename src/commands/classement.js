@@ -162,14 +162,14 @@ module.exports = {
         const positionChange = this.getPositionChange(team.old_position, team.new_position);
         const prefix = isTarget ? '**\u25ba** ' : '';
         const suffix = isTarget ? ' **\u25c4**' : '';
-        const line = `${prefix}**${team.new_position}.** ${clubName}${suffix} - ${team.pts}pts (${team.won}-${team.drawn}-${team.lost}) ${team.played}/${totalMatchesInSeason} ${positionChange}\n`;
+        const line = `${prefix}**${team.new_position}.** ${clubName}${suffix} - ${team.pts}pts ${team.played}/${totalMatchesInSeason}\n`;
         if (currentText.length + line.length > 1023) {
           fields.push(currentText);
           currentText = '';
         }
         currentText += line;
       }
-      if (currentText) fields.push(currentText);
+      if (currentText) fields.push(currentText.trimEnd());
       for (const fieldValue of fields) {
         embed.addFields({
           name: '\u200b',
