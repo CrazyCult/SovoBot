@@ -6,7 +6,7 @@ const RateLimiter = require('../utils/RateLimiter');
 class ApiClient {
   constructor() {
     this.baseUrl = 'https://services.soccerverse.com/api';
-    this.rpcUrl = 'https://services.soccerverse.com/gsp/';
+    this.rpcUrl = 'https://gsppub.soccerverse.io/';
     
     // ✅ RATE LIMITER GLOBAL (3 requêtes/seconde)
     this.rateLimiter = new RateLimiter(3);
@@ -181,16 +181,12 @@ class ApiClient {
         id: Date.now()
       };
 
-      // ✅ UTILISER LE RATE LIMITER + CLOUDFLARE HEADERS
+      // ✅ UTILISER LE RATE LIMITER (gsppub.soccerverse.io - pas de Cloudflare)
       const data = await this.rateLimiter.execute(async () => {
         const response = await axios.post(this.rpcUrl, payload, {
           timeout: 15000,
           headers: {
-            'Content-Type': 'application/json',
-            'Origin': 'https://play.soccerverse.com',
-            'Referer': 'https://play.soccerverse.com/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            ...this.getBotHeaders()
+            'Content-Type': 'application/json'
           }
         });
         

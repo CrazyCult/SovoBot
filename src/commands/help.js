@@ -1,7 +1,7 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 
 module.exports = {
-  name: 'help',
+  name: 'aide',
   description: 'Afficher l\'aide du bot',
   usage: '!help',
   
@@ -173,3 +173,7 @@ module.exports = {
   }
 };
 
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('aide')
+  .setDescription('Afficher l\'aide et la liste des commandes');

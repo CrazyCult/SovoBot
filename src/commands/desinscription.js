@@ -159,3 +159,11 @@ module.exports = {
     }
   }
 };
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('desinscription')
+  .setDescription('Se désinscrire du suivi d\'un club')
+  .addStringOption(opt => opt
+    .setName('club')
+    .setDescription('ID ou nom du club')
+    .setRequired(true)
+  );

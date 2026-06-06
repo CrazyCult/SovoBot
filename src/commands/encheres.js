@@ -489,3 +489,12 @@ module.exports = {
     });
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('encheres')
+  .setDescription('Surveiller les enchères d\'un club')
+  .addStringOption(opt => opt
+    .setName('club')
+    .setDescription('ID ou nom du club')
+    .setRequired(false)
+  );

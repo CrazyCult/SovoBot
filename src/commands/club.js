@@ -331,3 +331,12 @@ module.exports = {
   }
 };
 
+// Slash command definition
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('club')
+  .setDescription('Afficher les infos d\'un club')
+  .addStringOption(opt => opt
+    .setName('recherche')
+    .setDescription('ID ou nom du club (vide = clubs inscrits)')
+    .setRequired(false)
+  );

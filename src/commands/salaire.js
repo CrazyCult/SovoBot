@@ -369,3 +369,17 @@ module.exports = {
     }
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('salaire')
+  .setDescription('Calculer le salaire d\'un joueur')
+  .addIntegerOption(opt => opt
+    .setName('ovr')
+    .setDescription('Overall du joueur')
+    .setRequired(true)
+  )
+  .addIntegerOption(opt => opt
+    .setName('age')
+    .setDescription('Age du joueur')
+    .setRequired(false)
+  );

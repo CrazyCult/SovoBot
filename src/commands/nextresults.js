@@ -191,3 +191,7 @@ module.exports = {
     }
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('nextresults')
+  .setDescription('Afficher les prochains résultats attendus');

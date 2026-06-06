@@ -143,10 +143,7 @@ module.exports = {
       // Statistiques du club sélectionné
       embed.addFields({
         name: `🎯 ${clubData.display_name} (#${clubId})`,
-        value: `**Position:** ${targetClub.new_position}${this.getPositionSuffix(targetClub.new_position)} ${this.getPositionChange(targetClub.old_position, targetClub.new_position)}\n` +
-               `**Points:** ${targetClub.pts} • **Matchs:** ${targetClub.played}\n` +
-               `**V-N-D:** ${targetClub.won}-${targetClub.drawn}-${targetClub.lost}\n` +
-               `**Buts:** ${targetClub.goals_for}:${targetClub.goals_against} (${targetClub.goals_for - targetClub.goals_against > 0 ? '+' : ''}${targetClub.goals_for - targetClub.goals_against})\n` +
+        value: `**Position:** ${targetClub.new_position}${this.getPositionSuffix(targetClub.new_position)} ${this.getPositionChange(targetClub.old_position, targetClub.new_position)} • **${targetClub.pts}pts** • ${targetClub.won}-${targetClub.drawn}-${targetClub.lost} • ${targetClub.goals_for}:${targetClub.goals_against}\n` +
                `**Forme:** ${apiClient.formatForm(targetClub.form)}`,
         inline: false
       });
@@ -154,44 +151,29 @@ module.exports = {
       // Afficher le classement avec plus d'équipes - format optimisé
       const totalTeams = leagueTable.length;
       const maxTeamsToShow = Math.min(totalTeams, 50); // Augmenter à 50 équipes avec le format compact
-
-      // Diviser en groupes de 12 équipes maximum par field (limite Discord: 1024 caractères)
-      const teamsPerField = 12;
-      const numFields = Math.ceil(maxTeamsToShow / teamsPerField);
-
-      for (let fieldIndex = 0; fieldIndex < numFields; fieldIndex++) {
-        const startIndex = fieldIndex * teamsPerField;
-        const endIndex = Math.min(startIndex + teamsPerField, maxTeamsToShow);
-
-        let tableText = '';
-
-        for (let i = startIndex; i < endIndex; i++) {
-          const team = leagueTable[i];
-          const clubName = team.club_name; // ✅ Utilise le nom déjà enrichi par getLeagueTable
-          const isTarget = team.club_id === clubId;
-          const positionChange = this.getPositionChange(team.old_position, team.new_position);
-
-          // Mettre en évidence le club recherché
-          const prefix = isTarget ? '**►** ' : '';
-          const suffix = isTarget ? ' **◄**' : '';
-
-          // Format ultra-compact pour afficher plus d'équipes
-          tableText += `${prefix}**${team.new_position}.** ${clubName}${suffix} - ${team.pts}pts (${team.won}-${team.drawn}-${team.lost}) ${positionChange}\n`;
+      // Total matchs de la saison = (nbEquipes - 1) * 2 (aller-retour)
+      const totalMatchesInSeason = (totalTeams - 1) * 2;
+      let currentText = '';
+      const fields = [];
+      for (let i = 0; i < maxTeamsToShow; i++) {
+        const team = leagueTable[i];
+        const clubName = team.club_name;
+        const isTarget = team.club_id === clubId;
+        const positionChange = this.getPositionChange(team.old_position, team.new_position);
+        const prefix = isTarget ? '**\u25ba** ' : '';
+        const suffix = isTarget ? ' **\u25c4**' : '';
+        const line = `${prefix}**${team.new_position}.** ${clubName}${suffix} - ${team.pts}pts (${team.won}-${team.drawn}-${team.lost}) ${team.played}/${totalMatchesInSeason} ${positionChange}\n`;
+        if (currentText.length + line.length > 1023) {
+          fields.push(currentText);
+          currentText = '';
         }
-
-        // Nom du champ selon la position
-        let fieldName;
-        if (numFields === 1) {
-          fieldName = `📊 Classement complet (${maxTeamsToShow} équipes)`;
-        } else {
-          const rangeStart = startIndex + 1;
-          const rangeEnd = endIndex;
-          fieldName = `📊 Classement ${rangeStart}-${rangeEnd}`;
-        }
-
+        currentText += line;
+      }
+      if (currentText) fields.push(currentText);
+      for (const fieldValue of fields) {
         embed.addFields({
-          name: fieldName,
-          value: tableText || 'Aucune donnée',
+          name: '\u200b',
+          value: fieldValue,
           inline: false
         });
       }
@@ -205,21 +187,6 @@ module.exports = {
         });
       }
 
-      // Statistiques de la ligue
-      const totalGoals = leagueTable.reduce((sum, team) => sum + team.goals_for, 0);
-      const totalMatches = leagueTable.reduce((sum, team) => sum + team.played, 0);
-      const leader = leagueTable[0];
-      const lastPlace = leagueTable[leagueTable.length - 1];
-
-      embed.addFields({
-        name: '📈 Statistiques de la ligue',
-        value: `**Équipes:** ${leagueTable.length}\n` +
-               `**Matchs joués:** ${totalMatches}\n` +
-               `**Buts marqués:** ${totalGoals}\n` +
-               `**Leader:** ${apiClient.getClubName(leader.club_id)} (${leader.pts}pts)\n` +
-               `**Dernier:** ${apiClient.getClubName(lastPlace.club_id)} (${lastPlace.pts}pts)`,
-        inline: true
-      });
 
       embed.setFooter({ 
         text: `Ligue ID: ${clubData.league_id} • Saison ${targetClub.season_id} • Soccerverse Bot v3.0` 
@@ -269,3 +236,12 @@ module.exports = {
     }
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('classement')
+  .setDescription('Afficher le classement d\'une ligue')
+  .addStringOption(opt => opt
+    .setName('ligue')
+    .setDescription('ID ou nom de la ligue')
+    .setRequired(false)
+  );

@@ -237,3 +237,12 @@ module.exports = {
     }
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('calendrier')
+  .setDescription('Afficher le calendrier d\'un club')
+  .addStringOption(opt => opt
+    .setName('club')
+    .setDescription('ID ou nom du club')
+    .setRequired(false)
+  );

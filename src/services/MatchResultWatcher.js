@@ -161,6 +161,7 @@ class MatchResultWatcher {
       
       // Sauvegarder le cache
       await this.saveMatchCache();
+      if (this.onCacheReady) this.onCacheReady();
       
     } catch (error) {
       logger.error('❌ Erreur mise à jour cache matchs:', error);
@@ -358,64 +359,84 @@ class MatchResultWatcher {
   async sendMatchResult(clubId, match) {
     try {
       const channels = this.dataManager.getChannelsForClub(clubId);
-      
       if (channels.length === 0) {
         logger.debug(`Aucun canal pour le club ${clubId}, skip notification`);
         return;
       }
-      
       const isHome = match.home_club == clubId;
       const opponentId = isHome ? match.away_club : match.home_club;
       const opponentName = this.apiClient.getClubName(opponentId);
       const clubName = this.apiClient.getClubName(clubId);
-      
-      const result = `${match.home_goals}-${match.away_goals}`;
-      let resultEmoji = '⚪';
-      let resultText = 'Match nul';
-      let embedColor = '#FFA500';
-      
-      if ((isHome && match.home_goals > match.away_goals) || 
-          (!isHome && match.away_goals > match.home_goals)) {
-        resultEmoji = '✅';
-        resultText = 'Victoire !';
-        embedColor = '#4CAF50';
-      } else if ((isHome && match.home_goals < match.away_goals) || 
-                 (!isHome && match.away_goals < match.home_goals)) {
-        resultEmoji = '❌';
-        resultText = 'Défaite';
-        embedColor = '#FF6B6B';
-      }
-      
-      const venue = isHome ? '🏟️ Domicile' : '✈️ Extérieur';
-      
+      const myGoals = isHome ? match.home_goals : match.away_goals;
+      const oppGoals = isHome ? match.away_goals : match.home_goals;
+      let resultEmoji = "⚪";
+      let resultText = "Match nul";
+      let embedColor = "#FFA500";
+      if (myGoals > oppGoals) { resultEmoji = "✅"; resultText = "Victoire !"; embedColor = "#4CAF50"; }
+      else if (myGoals < oppGoals) { resultEmoji = "❌"; resultText = "Defaite"; embedColor = "#FF6B6B"; }
+      const venue = isHome ? "🏟️ Domicile" : "✈️ Exterieur";
+      let fixtureData = null;
+      let subsData = [];
+      try {
+        const fixtureId = match.fixture_id || match.match_id;
+        if (fixtureId) {
+          const [fixtureRes, subsRes] = await Promise.all([
+            this.apiClient.makeRpcRequest("get_fixture", { fixture_id: fixtureId }),
+            this.apiClient.makeRpcRequest("get_match_subs", { fixture_id: fixtureId })
+          ]);
+          fixtureData = Array.isArray(fixtureRes) ? fixtureRes[0] : fixtureRes;
+          subsData = Array.isArray(subsRes) ? subsRes : [];
+        }
+      } catch (e) { logger.warn("Stats detaillees non disponibles:", e.message); }
       const embed = new EmbedBuilder()
         .setColor(embedColor)
-        .setTitle(`${resultEmoji} ${resultText}`)
-        .setDescription(`**${clubName}** ${isHome ? match.home_goals : match.away_goals} - ${isHome ? match.away_goals : match.home_goals} **${opponentName}**`)
-        .addFields(
-          { name: '⚽ Score final', value: result, inline: true },
-          { name: '📍 Lieu', value: venue, inline: true }
-        )
+        .setTitle(`${resultEmoji} ${resultText} — ${clubName}`)
+        .setDescription(`**${clubName}** ${myGoals} - ${oppGoals} **${opponentName}**`)
         .setThumbnail(`https://elrincondeldt.com/sv/photos/teams/${clubId}.png`)
-        .setFooter({ text: 'Soccerverse Bot v3.0 • Résultat du match' })
+        .setFooter({ text: "Soccerverse Bot v3.0 • Resultat du match" })
         .setTimestamp();
-      
+      embed.addFields({ name: "📍 Lieu", value: venue, inline: true });
+      if (fixtureData) {
+        const myPoss = isHome ? fixtureData.home_possession : fixtureData.away_possession;
+        const oppPoss = isHome ? fixtureData.away_possession : fixtureData.home_possession;
+        const myShots = isHome ? fixtureData.home_shots : fixtureData.away_shots;
+        const oppShots = isHome ? fixtureData.away_shots : fixtureData.home_shots;
+        const mySOT = isHome ? fixtureData.home_shots_on_target : fixtureData.away_shots_on_target;
+        const oppSOT = isHome ? fixtureData.away_shots_on_target : fixtureData.home_shots_on_target;
+        const myCorners = isHome ? fixtureData.home_corners : fixtureData.away_corners;
+        const oppCorners = isHome ? fixtureData.away_corners : fixtureData.home_corners;
+        const attendance = fixtureData.attendance || 0;
+        if (myPoss !== undefined) embed.addFields({ name: "📊 Possession", value: `**${myPoss}%** - ${oppPoss}%`, inline: true });
+        if (myShots !== undefined) embed.addFields({ name: "🎯 Tirs (cadres)", value: `**${myShots} (${mySOT})** - ${oppShots} (${oppSOT})`, inline: true });
+        if (myCorners !== undefined) embed.addFields({ name: "🚩 Corners", value: `**${myCorners}** - ${oppCorners}`, inline: true });
+        if (attendance > 0) embed.addFields({ name: "🏟️ Affluence", value: `${attendance.toLocaleString("fr-FR")} spectateurs`, inline: true });
+        if (fixtureData.man_of_match) {
+          const momName = this.apiClient.getPlayerName(fixtureData.man_of_match) || `Joueur #${fixtureData.man_of_match}`;
+          embed.addFields({ name: "⭐ Man of the Match", value: momName, inline: true });
+        }
+      }
+      if (subsData.length > 0) {
+        const mySubs = subsData.filter(s => s.club_id == clubId);
+        if (mySubs.length > 0) {
+          const lines = mySubs.map(s => {
+            const nameOn = this.apiClient.getPlayerName(s.player_on_id) || `#${s.player_on_id}`;
+            const nameOff = this.apiClient.getPlayerName(s.player_off_id) || `#${s.player_off_id}`;
+            return `↑ ${nameOn} / ↓ ${nameOff} (${s.time}')`;
+          });
+          embed.addFields({ name: "🔄 Remplacements", value: lines.join("\n"), inline: false });
+        }
+      }
       for (const channelId of channels) {
         try {
           const channel = await this.client.channels.fetch(channelId);
           await channel.send({ embeds: [embed] });
-          logger.info(`📤 Résultat envoyé: ${clubName} ${result} dans canal ${channelId}`);
-        } catch (error) {
-          logger.error(`Erreur envoi résultat canal ${channelId}:`, error.message);
-        }
+          logger.info(`Resultat envoye: ${clubName} ${myGoals}-${oppGoals}`);
+        } catch (error) { logger.error(`Erreur canal ${channelId}:`, error.message); }
       }
-      
-    } catch (error) {
-      logger.error('Erreur sendMatchResult:', error);
-    }
+    } catch (error) { logger.error("Erreur sendMatchResult:", error); }
   }
 
-  // =================== PERSISTENCE ===================
+    // =================== PERSISTENCE ===================
   
   loadProcessedMatches() {
     try {

@@ -457,3 +457,7 @@ module.exports = {
     await message.reply({ embeds: [embed] });
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('suivi')
+  .setDescription('Afficher les clubs suivis dans ce salon');

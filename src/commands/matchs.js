@@ -236,3 +236,11 @@ module.exports = {
     }
   }
 };
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('matchs')
+  .setDescription('Afficher les matchs d\'un club')
+  .addStringOption(opt => opt
+    .setName('club')
+    .setDescription('ID ou nom du club (vide = clubs inscrits)')
+    .setRequired(false)
+  );

@@ -250,3 +250,7 @@ module.exports = {
     }
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('gastracker')
+  .setDescription('Suivre le prix du gas Polygon dans ce salon');

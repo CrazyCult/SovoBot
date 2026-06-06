@@ -156,9 +156,59 @@ class SoccerverseBot {
 
     // Event: Interactions (boutons, slash commands)
     this.client.on('interactionCreate', async (interaction) => {
+      // Slash commands
+      if (interaction.isChatInputCommand()) {
+        const command = this.commands.get(interaction.commandName);
+        if (!command) return;
+        try {
+          await interaction.deferReply();
+          const args = [];
+          // Recuperer toutes les options dans l'ordre
+          const optNames = ['recherche', 'club', 'ligue', 'manager', 'action'];
+          for (const name of optNames) {
+            try {
+              const val = interaction.options.getString(name);
+              if (val) args.push(val);
+            } catch(e) {}
+          }
+          // Options entières (salaire)
+          try {
+            const ovr = interaction.options.getInteger('ovr');
+            const age = interaction.options.getInteger('age');
+            if (ovr !== null) args.push(ovr.toString());
+            if (age !== null) args.push(age.toString());
+          } catch(e) {}
+          const fakeMessage = {
+            channel: interaction.channel,
+            author: interaction.user,
+            guild: interaction.guild,
+            reply: async (content) => {
+              if (interaction.deferred) return interaction.editReply(content);
+              return interaction.reply(content);
+            }
+          };
+          await command.execute(fakeMessage, args, {
+            apiClient: this.apiClient,
+            dataManager: this.dataManager,
+            matchNotificationWatcher: this.matchNotificationWatcher,
+            matchResultWatcher: this.matchResultWatcher,
+            polygonStalkerService: this.polygonStalkerService,
+            encheresWatcher: this.encheresWatcher,
+            clubNewsWatcher: this.clubNewsWatcher,
+            gasTrackerService: this.gasTrackerService,
+            clubFollowerWatcher: this.clubFollowerWatcher,
+            isSlash: true,
+            interaction: interaction
+          });
+        } catch (error) {
+          logger.error('Erreur slash ' + interaction.commandName + ':', error);
+          if (interaction.deferred) await interaction.editReply('Une erreur est survenue.');
+        }
+        return;
+      }
       if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
       
-      // Gérer les interactions de boutons
+      // Gerer les interactions de boutons
       await this.handleInteraction(interaction);
     });
 

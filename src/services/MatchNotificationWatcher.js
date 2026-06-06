@@ -32,9 +32,11 @@ class MatchNotificationWatcher {
 
   startWatching() {
     // ✅ Programmer les notifications 30 secondes après le démarrage
-    setTimeout(() => {
+    // S'abonner au cache du MatchResultWatcher plutot qu'un timeout fixe
+    this.matchResultWatcher.onCacheReady = () => {
+      logger.info('🔔 Cache pret, programmation des notifications...');
       this.scheduleAllNotifications();
-    }, 30000);
+    };
     
     // ✅ Re-programmer toutes les 6 heures (au cas où de nouveaux clubs sont inscrits)
     setInterval(() => {

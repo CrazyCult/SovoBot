@@ -341,3 +341,17 @@ module.exports = {
     await message.reply({ embeds: [embed] });
   }
 };
+
+module.exports.slashCommand = new (require('discord.js').SlashCommandBuilder)()
+  .setName('notifications')
+  .setDescription('Gérer les notifications de composition')
+  .addStringOption(opt => opt
+    .setName('action')
+    .setDescription('Action à effectuer')
+    .setRequired(false)
+    .addChoices(
+      { name: 'status', value: 'status' },
+      { name: 'activer', value: 'on' },
+      { name: 'désactiver', value: 'off' }
+    )
+  );
