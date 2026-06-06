@@ -437,11 +437,19 @@ class MatchResultWatcher {
           embed.addFields({ name: "🔄 Remplacements", value: lines.join("\n"), inline: false });
         }
       }
-      // Bouton classement
+      // Boutons
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId(`classement_${clubId}`)
           .setLabel('📊 Classement')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`calendrier_${clubId}`)
+          .setLabel('📅 Calendrier')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`club_${clubId}`)
+          .setLabel('🏟️ Club')
           .setStyle(ButtonStyle.Secondary)
       );
 

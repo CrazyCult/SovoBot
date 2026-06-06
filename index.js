@@ -245,6 +245,12 @@ class SoccerverseBot {
         case 'classement':
           await this.handleClassementButton(interaction, params[0]);
           break;
+        case 'calendrier':
+          await this.handleCalendrierButton(interaction, params[0]);
+          break;
+        case 'club':
+          await this.handleClubButton(interaction, params[0]);
+          break;
         case 'stalker':
           await this.handleStalkerButton(interaction, params);
           break;
@@ -323,6 +329,52 @@ class SoccerverseBot {
       content: `✅ Club ID ${clubId} retiré des notifications.`, 
       flags: 64
     });
+  }
+
+  async handleCalendrierButton(interaction, clubId) {
+    try {
+      await interaction.deferReply();
+      const command = this.commands.get('calendrier');
+      if (!command) return interaction.editReply('❌ Commande non trouvée.');
+      const fakeMessage = {
+        channel: interaction.channel,
+        author: interaction.user,
+        guild: interaction.guild,
+        reply: async (content) => interaction.editReply(content)
+      };
+      await command.execute(fakeMessage, [clubId], {
+        apiClient: this.apiClient,
+        dataManager: this.dataManager,
+        isSlash: true,
+        interaction: interaction
+      });
+    } catch (error) {
+      logger.error('Erreur bouton calendrier:', error);
+      if (!interaction.replied) await interaction.editReply('❌ Erreur.');
+    }
+  }
+
+  async handleClubButton(interaction, clubId) {
+    try {
+      await interaction.deferReply();
+      const command = this.commands.get('club');
+      if (!command) return interaction.editReply('❌ Commande non trouvée.');
+      const fakeMessage = {
+        channel: interaction.channel,
+        author: interaction.user,
+        guild: interaction.guild,
+        reply: async (content) => interaction.editReply(content)
+      };
+      await command.execute(fakeMessage, [clubId], {
+        apiClient: this.apiClient,
+        dataManager: this.dataManager,
+        isSlash: true,
+        interaction: interaction
+      });
+    } catch (error) {
+      logger.error('Erreur bouton club:', error);
+      if (!interaction.replied) await interaction.editReply('❌ Erreur.');
+    }
   }
 
   async handleClassementButton(interaction, clubId) {
