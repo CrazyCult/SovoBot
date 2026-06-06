@@ -242,6 +242,9 @@ class SoccerverseBot {
           await this.handleUnregisterButton(interaction, params[0]);
           break;
         // ❌ SUPPRIMÉ: case 'orderbook' et 'watchlist'
+        case 'classement':
+          await this.handleClassementButton(interaction, params[0]);
+          break;
         case 'stalker':
           await this.handleStalkerButton(interaction, params);
           break;
@@ -320,6 +323,29 @@ class SoccerverseBot {
       content: `✅ Club ID ${clubId} retiré des notifications.`, 
       flags: 64
     });
+  }
+
+  async handleClassementButton(interaction, clubId) {
+    try {
+      await interaction.deferReply();
+      const command = this.commands.get('classement');
+      if (!command) return interaction.editReply('❌ Commande classement non trouvée.');
+      const fakeMessage = {
+        channel: interaction.channel,
+        author: interaction.user,
+        guild: interaction.guild,
+        reply: async (content) => interaction.editReply(content)
+      };
+      await command.execute(fakeMessage, [clubId], {
+        apiClient: this.apiClient,
+        dataManager: this.dataManager,
+        isSlash: true,
+        interaction: interaction
+      });
+    } catch (error) {
+      logger.error('Erreur bouton classement:', error);
+      if (!interaction.replied) await interaction.editReply('❌ Erreur.');
+    }
   }
 
   async handleStalkerButton(interaction, params) {

@@ -1,4 +1,4 @@
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const logger = require('../utils/logger');
 
 class MatchResultWatcher {
@@ -51,9 +51,19 @@ class MatchResultWatcher {
       this.saveProcessedMatches();
     }, 10 * 60 * 1000);
     
+    // ✅ Scan de rattrapage toutes les 5 minutes
+    setInterval(async () => {
+      await this.scanMissedResults();
+    }, 5 * 60 * 1000);
+
+    // Premier scan 2 minutes après démarrage
+    setTimeout(async () => {
+      await this.scanMissedResults();
+    }, 2 * 60 * 1000);
+
     logger.info('⚽ Surveillance résultats optimisée démarrée');
     logger.info('   📅 Cache : Mise à jour quotidienne à 3h00');
-    logger.info('   ⏰ Vérifications : Heure du match + 15s (3 tentatives si échec)');
+    logger.info('   ⏰ Vérifications : Heure du match + 15s + scan rattrapage toutes les 5min');
   }
 
   // =================== MISE À JOUR DU CACHE (1x/JOUR à 3h) ===================
@@ -384,7 +394,8 @@ class MatchResultWatcher {
             this.apiClient.makeRpcRequest("get_fixture", { fixture_id: fixtureId }),
             this.apiClient.makeRpcRequest("get_match_subs", { fixture_id: fixtureId })
           ]);
-          fixtureData = Array.isArray(fixtureRes) ? fixtureRes[0] : fixtureRes;
+          const fArr = fixtureRes?.data || (Array.isArray(fixtureRes) ? fixtureRes : [fixtureRes]);
+          fixtureData = fArr[0] || null;
           subsData = Array.isArray(subsRes) ? subsRes : [];
         }
       } catch (e) { logger.warn("Stats detaillees non disponibles:", e.message); }
@@ -426,17 +437,71 @@ class MatchResultWatcher {
           embed.addFields({ name: "🔄 Remplacements", value: lines.join("\n"), inline: false });
         }
       }
+      // Bouton classement
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`classement_${clubId}`)
+          .setLabel('📊 Classement')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
       for (const channelId of channels) {
         try {
           const channel = await this.client.channels.fetch(channelId);
-          await channel.send({ embeds: [embed] });
+          await channel.send({ embeds: [embed], components: [row] });
           logger.info(`Resultat envoye: ${clubName} ${myGoals}-${oppGoals}`);
         } catch (error) { logger.error(`Erreur canal ${channelId}:`, error.message); }
       }
     } catch (error) { logger.error("Erreur sendMatchResult:", error); }
   }
 
-    // =================== PERSISTENCE ===================
+  
+  // =================== SCAN DE RATTRAPAGE ===================
+  async scanMissedResults() {
+    try {
+      const registeredClubs = this.dataManager.getAllRegisteredClubs();
+      const now = Date.now() / 1000;
+      const todayStart = now - (12 * 60 * 60); // 3 dernières heures
+
+      for (const clubId of registeredClubs) {
+        try {
+          const lastMatch = await this.apiClient.getClubLastMatch(parseInt(clubId));
+          if (!lastMatch) continue;
+
+          // Match joué aujourd'hui ?
+          if (lastMatch.played !== 1) continue;
+          if (lastMatch.date < todayStart) continue;
+
+          const matchKey = this.generateMatchKey(clubId, lastMatch);
+          if (this.processedMatches.has(matchKey)) continue;
+
+          logger.info(`🔍 Résultat manqué détecté: Club ${clubId} - match du ${new Date(lastMatch.date * 1000).toLocaleString('fr-FR')}`);
+          await this.sendMatchResult(clubId, lastMatch);
+
+          this.processedMatches.set(matchKey, {
+            timestamp: Date.now(),
+            clubId: clubId,
+            matchId: lastMatch.fixture_id,
+            homeGoals: lastMatch.home_goals,
+            awayGoals: lastMatch.away_goals,
+            date: lastMatch.date,
+            source: 'scan_rattrapage'
+          });
+          await this.saveProcessedMatches();
+
+          // Délai entre les clubs pour ne pas surcharger l'API
+          await new Promise(resolve => setTimeout(resolve, 1000));
+
+        } catch (e) {
+          // Silencieux pour ne pas spammer les logs
+        }
+      }
+    } catch (error) {
+      logger.error('❌ Erreur scan rattrapage:', error.message);
+    }
+  }
+
+  // =================== PERSISTENCE ===================
   
   loadProcessedMatches() {
     try {
