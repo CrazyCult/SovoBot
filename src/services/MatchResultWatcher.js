@@ -101,7 +101,8 @@ class MatchResultWatcher {
         try {
           // Récupérer les prochains matchs du club
           logger.debug(`🔍 Récupération matchs pour club ${clubId}...`);
-          const matches = await this.apiClient.getClubSchedule(parseInt(clubId), 10);
+          const nextMatch = await this.apiClient.getClubNextMatch(parseInt(clubId));
+          const matches = nextMatch ? [nextMatch] : [];
           
           // ✅ DEBUG: Afficher ce que l'API retourne
           logger.debug(`  📥 API retourne ${matches.length} match(s) pour club ${clubId}`);
@@ -122,7 +123,7 @@ class MatchResultWatcher {
           const upcomingMatches = matches.filter(match => 
             match.date > now && 
             match.date < next7Days && 
-            match.played === 0
+            match.played === 0 || match.played === undefined
           );
           
           // ✅ DEBUG: Résultat du filtrage

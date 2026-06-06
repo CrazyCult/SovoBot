@@ -48,7 +48,7 @@ class DataManager {
           } else {
             // Nouveau format
             for (const [clubId, info] of Object.entries(clubs)) {
-              clubMap.set(clubId, info);
+              if (parseInt(clubId) > 0) { clubMap.set(clubId, info); }
             }
           }
           
