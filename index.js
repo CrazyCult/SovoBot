@@ -337,6 +337,22 @@ class SoccerverseBot {
         case 'stalker':
           await this.handleStalkerButton(interaction, params);
           break;
+        case 'marche':
+          if (params[0] === 'refresh') {
+            await interaction.deferUpdate();
+            const marcheCmd = this.commands.get('marche');
+            if (marcheCmd) {
+              marcheCmd.cache = null; // Invalider le cache
+              await marcheCmd.preload(this.apiClient);
+              if (marcheCmd.cache) {
+                await interaction.editReply({
+                  components: [marcheCmd.cache],
+                  flags: 1 << 15
+                });
+              }
+            }
+          }
+          break;
         case 'encheres':
           await this.handleEncheresButton(interaction, params);
           break;
