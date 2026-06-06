@@ -133,14 +133,24 @@ module.exports = {
     actionRow.addComponents(
       new ButtonBuilder()
         .setCustomId('encheres_stop')
-        .setLabel('Arrêter la surveillance')
+        .setLabel('Arrêter')
         .setStyle(ButtonStyle.Danger)
         .setEmoji('🔕'),
       new ButtonBuilder()
         .setCustomId('encheres_status')
-        .setLabel('Voir le statut')
+        .setLabel('Statut')
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji('📊')
+        .setEmoji('📊'),
+      new ButtonBuilder()
+        .setCustomId('encheres_addjoueur')
+        .setLabel('+ Joueur')
+        .setStyle(ButtonStyle.Success)
+        .setEmoji('➕'),
+      new ButtonBuilder()
+        .setCustomId('encheres_removejoueur')
+        .setLabel('- Joueur')
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🗑️')
     );
 
     await message.reply({ 

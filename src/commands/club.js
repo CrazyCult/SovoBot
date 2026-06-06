@@ -231,7 +231,17 @@ module.exports = {
       
       row.addComponents(
         new ButtonBuilder()
-          .setLabel('Voir sur Soccerverse')
+          .setCustomId(`effectif_${clubId}`)
+          .setLabel('Effectif')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('👥'),
+        new ButtonBuilder()
+          .setCustomId(`salaires_${clubId}`)
+          .setLabel('Salaires')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('💰'),
+        new ButtonBuilder()
+          .setLabel('Soccerverse')
           .setStyle(ButtonStyle.Link)
           .setURL(`https://play.soccerverse.com/club/${clubId}`)
           .setEmoji('🌐')

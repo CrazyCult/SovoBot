@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 const logger = require('./src/utils/logger');
@@ -96,6 +96,20 @@ class SoccerverseBot {
         this.matchResultWatcher  // ✅ CACHE PARTAGÉ
       );
       logger.info('⚽ Service de notifications de composition initialisé (cache partagé)');
+
+      // Précharger le marché
+      const marcheCmd = this.commands.get('marche');
+      if (marcheCmd && marcheCmd.preload) {
+        setTimeout(() => marcheCmd.preload(this.apiClient), 30000);
+        const now = new Date();
+        const nextHalf = new Date(now);
+        nextHalf.setMinutes(30, 0, 0);
+        if (now.getMinutes() >= 30) nextHalf.setHours(nextHalf.getHours() + 1);
+        setTimeout(() => {
+          marcheCmd.preload(this.apiClient);
+          setInterval(() => marcheCmd.preload(this.apiClient), 60 * 60 * 1000);
+        }, nextHalf - now);
+      }
       
       // Initialiser le service de surveillance Stalker
       this.polygonStalkerService = new PolygonStalkerService(this.client, this.dataManager, this.apiClient);
@@ -156,6 +170,46 @@ class SoccerverseBot {
 
     // Event: Interactions (boutons, slash commands)
     this.client.on('interactionCreate', async (interaction) => {
+      // Modals
+      if (interaction.isModalSubmit()) {
+        if (interaction.customId === 'encheres_addjoueur_modal') {
+          const playerId = interaction.fields.getTextInputValue('player_id_input');
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            const channelId = interaction.channelId;
+            const settings = this.dataManager.getChannelSettings(channelId);
+            if (!settings.encheresWatching) return interaction.editReply('❌ Aucune surveillance active.');
+            const pid = parseInt(playerId);
+            if (isNaN(pid)) return interaction.editReply('❌ ID invalide.');
+            if (!settings.encheresWatching.players) settings.encheresWatching.players = [];
+            if (settings.encheresWatching.players.includes(pid)) return interaction.editReply('⚠️ Joueur déjà surveillé.');
+            settings.encheresWatching.players.push(pid);
+            this.dataManager.setChannelSettings(channelId, settings);
+            await this.dataManager.save();
+            const name = this.apiClient.getPlayerName(pid) || `#${pid}`;
+            await interaction.editReply(`✅ Joueur **${name}** ajouté à la surveillance.`);
+          } catch(e) { await interaction.editReply('❌ Erreur.'); }
+        }
+        if (interaction.customId === 'encheres_removejoueur_modal') {
+          const playerId = interaction.fields.getTextInputValue('player_id_remove');
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            const channelId = interaction.channelId;
+            const settings = this.dataManager.getChannelSettings(channelId);
+            if (!settings.encheresWatching?.players) return interaction.editReply('❌ Aucun joueur surveillé.');
+            const pid = parseInt(playerId);
+            const idx = settings.encheresWatching.players.indexOf(pid);
+            if (idx === -1) return interaction.editReply('❌ Joueur non trouvé.');
+            settings.encheresWatching.players.splice(idx, 1);
+            this.dataManager.setChannelSettings(channelId, settings);
+            await this.dataManager.save();
+            const name = this.apiClient.getPlayerName(pid) || `#${pid}`;
+            await interaction.editReply(`✅ Joueur **${name}** retiré de la surveillance.`);
+          } catch(e) { await interaction.editReply('❌ Erreur.'); }
+        }
+        return;
+      }
+
       // Slash commands
       if (interaction.isChatInputCommand()) {
         const command = this.commands.get(interaction.commandName);
@@ -206,6 +260,29 @@ class SoccerverseBot {
         }
         return;
       }
+      // Select menu enchères supprimer joueur
+      if (interaction.isStringSelectMenu() && interaction.customId === 'encheres_removejoueur_select') {
+        await interaction.deferUpdate();
+        try {
+          const channelId = interaction.channelId;
+          const pid = parseInt(interaction.values[0]);
+          const settings = this.dataManager.getChannelSettings(channelId);
+          const idx = settings.encheresWatching?.players?.indexOf(pid);
+          if (idx === -1 || idx === undefined) {
+            await interaction.editReply({ content: '❌ Joueur non trouvé.', components: [] });
+            return;
+          }
+          settings.encheresWatching.players.splice(idx, 1);
+          this.dataManager.setChannelSettings(channelId, settings);
+          await this.dataManager.save();
+          const name = this.apiClient.getPlayerName(pid) || `#${pid}`;
+          await interaction.editReply({ content: `✅ Joueur **${name}** retiré.`, components: [] });
+        } catch(e) {
+          await interaction.editReply({ content: '❌ Erreur.', components: [] });
+        }
+        return;
+      }
+
       if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
       
       // Gerer les interactions de boutons
@@ -248,6 +325,12 @@ class SoccerverseBot {
         case 'calendrier':
           await this.handleCalendrierButton(interaction, params[0]);
           break;
+        case 'effectif':
+          await this.handleEffectifButton(interaction, params[0]);
+          break;
+        case 'salaires':
+          await this.handleSalairesButton(interaction, params[0]);
+          break;
         case 'club':
           await this.handleClubButton(interaction, params[0]);
           break;
@@ -257,6 +340,34 @@ class SoccerverseBot {
         case 'encheres':
           await this.handleEncheresButton(interaction, params);
           break;
+        case 'encheres_addjoueur': {
+          const modal = new ModalBuilder()
+            .setCustomId('encheres_addjoueur_modal')
+            .setTitle('Ajouter un joueur');
+          const input = new TextInputBuilder()
+            .setCustomId('player_id_input')
+            .setLabel('ID du joueur')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('ex: 486169')
+            .setRequired(true);
+          modal.addComponents(new ActionRowBuilder().addComponents(input));
+          await interaction.showModal(modal);
+          break;
+        }
+        case 'encheres_removejoueur': {
+          const modal2 = new ModalBuilder()
+            .setCustomId('encheres_removejoueur_modal')
+            .setTitle('Retirer un joueur');
+          const input2 = new TextInputBuilder()
+            .setCustomId('player_id_remove')
+            .setLabel('ID du joueur à retirer')
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder('ex: 486169')
+            .setRequired(true);
+          modal2.addComponents(new ActionRowBuilder().addComponents(input2));
+          await interaction.showModal(modal2);
+          break;
+        }
         case 'composition':
           await this.handleCompositionButton(interaction, params);
           break;
@@ -329,6 +440,52 @@ class SoccerverseBot {
       content: `✅ Club ID ${clubId} retiré des notifications.`, 
       flags: 64
     });
+  }
+
+  async handleEffectifButton(interaction, clubId) {
+    try {
+      await interaction.deferReply();
+      const command = this.commands.get('effectif');
+      if (!command) return interaction.editReply('❌ Commande non trouvée.');
+      const fakeMessage = {
+        channel: interaction.channel,
+        author: interaction.user,
+        guild: interaction.guild,
+        reply: async (content) => interaction.editReply(content)
+      };
+      await command.execute(fakeMessage, [clubId], {
+        apiClient: this.apiClient,
+        dataManager: this.dataManager,
+        isSlash: true,
+        interaction: interaction
+      });
+    } catch (error) {
+      logger.error('Erreur bouton effectif:', error);
+      if (!interaction.replied) await interaction.editReply('❌ Erreur.');
+    }
+  }
+
+  async handleSalairesButton(interaction, clubId) {
+    try {
+      await interaction.deferReply();
+      const command = this.commands.get('salaire');
+      if (!command) return interaction.editReply('❌ Commande non trouvée.');
+      const fakeMessage = {
+        channel: interaction.channel,
+        author: interaction.user,
+        guild: interaction.guild,
+        reply: async (content) => interaction.editReply(content)
+      };
+      await command.execute(fakeMessage, [clubId], {
+        apiClient: this.apiClient,
+        dataManager: this.dataManager,
+        isSlash: true,
+        interaction: interaction
+      });
+    } catch (error) {
+      logger.error('Erreur bouton salaires:', error);
+      if (!interaction.replied) await interaction.editReply('❌ Erreur.');
+    }
   }
 
   async handleCalendrierButton(interaction, clubId) {
@@ -462,6 +619,41 @@ class SoccerverseBot {
         }
         break;
         
+      case 'addjoueur': {
+        const modal = new ModalBuilder()
+          .setCustomId('encheres_addjoueur_modal')
+          .setTitle('Ajouter un joueur');
+        const input = new TextInputBuilder()
+          .setCustomId('player_id_input')
+          .setLabel('ID du joueur')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('ex: 486169')
+          .setRequired(true);
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        await interaction.showModal(modal);
+        break;
+      }
+      case 'removejoueur': {
+        const settings = this.dataManager.getChannelSettings(channelId);
+        const players = settings.encheresWatching?.players || [];
+        if (players.length === 0) {
+          await interaction.reply({ content: '❌ Aucun joueur surveillé.', flags: 64 });
+          break;
+        }
+        const { StringSelectMenuBuilder } = require('discord.js');
+        const options = players.map(pid => ({
+          label: this.apiClient.getPlayerName(pid) || `Joueur #${pid}`,
+          value: pid.toString(),
+          description: `ID: ${pid}`
+        }));
+        const select = new StringSelectMenuBuilder()
+          .setCustomId('encheres_removejoueur_select')
+          .setPlaceholder('Choisir un joueur à retirer')
+          .addOptions(options);
+        const row = new ActionRowBuilder().addComponents(select);
+        await interaction.reply({ content: '🗑️ Quel joueur retirer ?', components: [row], flags: 64 });
+        break;
+      }
       case 'status':
         try {
           const encheresCommand = this.commands.get('encheres');
